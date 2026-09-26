@@ -22,8 +22,8 @@ const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) throw new Error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
 const sb = createClient(url, key, { auth: { persistSession: false } });
 
-const CG = 'Nhóm Cầu Giấy';
-const BDS = 'Nhóm BĐS Partner';
+const CG = 'Nhóm Nhà';
+const BDS = 'Nhóm Đối Tác';
 const ROSTER: [string, number, string, 'M' | 'F'][] = [
   ['Minh Tuấn', 3.5, CG, 'M'], ['Hoàng Nam', 4.2, BDS, 'M'], ['Quốc Anh', 3.0, CG, 'M'], ['Đức Thắng', 4.0, BDS, 'M'],
   ['Văn Hải', 3.8, CG, 'M'], ['Thành Long', 3.2, BDS, 'M'], ['Tiến Dũng', 4.5, BDS, 'M'], ['Bảo Khánh', 2.9, CG, 'M'],
@@ -60,11 +60,11 @@ async function main() {
   const rnd = rng(2026);
   const { data: players, error: pe } = await sb
     .from('players')
-    .insert(ROSTER.map(([name, rating, group_tag, gender]) => ({ name, rating, group_tag, gender })))
+    .insert(ROSTER.map(([full_name, skill_rating, group_tag, gender]) => ({ full_name, skill_rating, group_tag, gender })))
     .select('*');
   if (pe) throw pe;
   const byIdx = (i: number) => (players as PlayerRow[])[i - 1];
-  const P = (players as PlayerRow[]).map((p) => ({ ...p, rating: Number(p.rating) }));
+  const P = (players as PlayerRow[]).map((p) => ({ ...p, skill_rating: Number(p.skill_rating) }));
 
   const start = new Date();
   start.setHours(8, 0, 0, 0);
@@ -81,6 +81,9 @@ async function main() {
     .select('*')
     .single();
   if (te) throw te;
+
+  const { error: tpe } = await sb.from('tournament_players').insert(P.map((p) => ({ tournament_id: t.id, player_id: p.id })));
+  if (tpe) throw tpe;
 
   const liveCourts = ['Sân 1', 'Sân 2'];
   for (const [ei, e] of EVENTS.entries()) {

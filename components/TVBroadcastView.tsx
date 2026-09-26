@@ -1,10 +1,11 @@
 'use client';
 
-import { ExternalLink, Maximize, Pause, Play, Radio, RefreshCw, Trophy, Zap } from 'lucide-react';
+import { Crown, ExternalLink, Maximize, Pause, Play, Radio, RefreshCw, Trophy, Tv, Zap } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { fmtClock, groupsOfEvent, MATCH_TYPE_LABEL, MATCH_TYPE_SHORT, qualifiersOf, scoreCall, stageName, teamName } from '@/lib/engine';
 import { useStandingsEngine } from '@/lib/supabase';
-import type { CourtVM, TournamentVM, UIState } from '@/lib/types';
+import type { CourtVM, PodiumVM, TournamentVM, UIState } from '@/lib/types';
+import PodiumView from './PodiumView';
 import { CompactStandings } from './Standings';
 import { CYAN, LIME, LiveBadge, ServeBall } from './ui';
 
@@ -77,7 +78,7 @@ export default function TVBroadcastView({
   vm, ui, setUi, demo, setDemo, standalone = false,
 }: {
   vm: TournamentVM;
-  ui: Pick<UIState, 'tvCycle' | 'tvIdx'>;
+  ui: Pick<UIState, 'tvCycle' | 'tvIdx' | 'tvView'>;
   setUi: (patch: Partial<UIState> | ((u: UIState) => Partial<UIState>)) => void;
   demo?: boolean;
   setDemo?: (v: boolean) => void;
@@ -97,6 +98,9 @@ export default function TVBroadcastView({
   }, [ui.tvCycle, setUi]);
 
   const view = views[idx];
+  const podiumMode = ui.tvView === 'podium';
+  const podiums = vm.events.map((e) => engine.podiumFor(e.id)).filter((p): p is PodiumVM => !!p && p.entries.length > 0);
+  const podium = podiums.length ? podiums[ui.tvIdx % podiums.length] : undefined;
   const rows = view ? engine.getStandings(view.ev.id, view.group) : [];
   const nextUp = vm.matches.filter((m) => m.status === 'upcoming').slice(0, 3);
   const lastDone = vm.matches.filter((m) => m.status === 'completed').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).slice(-4).reverse();
@@ -109,7 +113,9 @@ export default function TVBroadcastView({
     if (req) Promise.resolve(req()).catch(() => undefined);
   };
 
+  const champions = podiums.flatMap((p) => p.entries.filter((e) => e.place === 1).map((e) => `VÔ ĐỊCH ${p.label.toUpperCase()}: ${e.team.name}`));
   const ticker = [
+    ...(podiumMode ? champions : []),
     ...lastDone.map((m) => {
       const aw = m.sa > m.sb;
       const tag = m.type === 'group' ? (m.group ? ` BẢNG ${m.group}` : '') : ` ${MATCH_TYPE_LABEL[m.type].toUpperCase()}`;
@@ -139,12 +145,17 @@ export default function TVBroadcastView({
           </div>
           <div className="flex items-center gap-[1.2cqw]">
             <span className="pm-display text-[length:1.1cqw] font-bold uppercase text-slate-400">
-              {vm.matches.some((m) => m.type !== 'group' && m.status !== 'completed') ? 'Loại trực tiếp' : 'Vòng bảng'}
+              {podiumMode ? 'Lễ trao giải' : vm.locked ? 'Đã kết thúc' : vm.matches.some((m) => m.type !== 'group' && m.status !== 'completed') ? 'Loại trực tiếp' : 'Vòng bảng'}
             </span>
             <span className="pm-num rounded-[0.4cqw] bg-[#1F2937] px-[0.8cqw] py-[0.3cqw] text-[length:1.6cqw] font-bold text-white">{now ? fmtClock(now) : '--:--:--'}</span>
           </div>
         </div>
 
+        {podiumMode ? (
+          <div className="flex min-h-0 flex-1 flex-col p-[1.6cqw]">
+            <PodiumView key={podium?.eventId ?? 'none'} variant="tv" podiums={podium ? [podium] : []} players={vm.players} title={podium ? `Trao giải · ${podium.label}` : 'Lễ trao giải'} />
+          </div>
+        ) : (
         <div className="flex min-h-0 flex-1 gap-[1.2cqw] p-[1.2cqw]">
           <div className="flex w-[60%] flex-col gap-[1cqw]">
             {vm.courts.map((c) => <TVCourt key={c.name} court={c} vm={vm} />)}
@@ -187,6 +198,7 @@ export default function TVBroadcastView({
             </div>
           </div>
         </div>
+        )}
 
         <div className="flex items-stretch border-t border-[#374151] bg-[#111827]">
           <span className="z-10 flex shrink-0 items-center gap-[0.5cqw] bg-[#A3E635] px-[1.2cqw] py-[0.7cqw] pm-display text-[length:1.3cqw] font-extrabold uppercase italic text-[#0B0F17]">
@@ -232,7 +244,14 @@ export default function TVBroadcastView({
           <button type="button" onClick={() => setUi({ tvCycle: !ui.tvCycle })} className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300">
             <RefreshCw className="h-4 w-4" /> Tự chuyển bảng: {ui.tvCycle ? 'Bật' : 'Tắt'}
           </button>
-          <a href={`/tv/${vm.tournament.id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300">
+          <button
+            type="button"
+            onClick={() => setUi({ tvView: podiumMode ? 'live' : 'podium', tvIdx: 0 })}
+            className={`inline-flex min-h-[40px] items-center gap-2 rounded-lg border px-3 text-sm font-semibold ${podiumMode ? 'border-[#F59E0B] bg-[#F59E0B]/10 text-[#F59E0B]' : 'border-[#374151] text-slate-300'}`}
+          >
+            {podiumMode ? <><Tv className="h-4 w-4" /> Màn hình Trực tiếp</> : <><Crown className="h-4 w-4" /> Màn hình Trao giải</>}
+          </button>
+          <a href={`/tv/${vm.tournament.id}${podiumMode ? '?view=podium' : ''}`} target="_blank" rel="noreferrer" className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300">
             <ExternalLink className="h-4 w-4" /> Mở tab TV riêng
           </a>
           <button type="button" onClick={goFull} className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#A3E635] px-3 text-sm font-bold text-[#0B0F17]">

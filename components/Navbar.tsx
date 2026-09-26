@@ -1,7 +1,10 @@
 'use client';
 
-import { LogIn, LogOut, Pause, Play, Settings, Smartphone, Trophy, Tv, Zap } from 'lucide-react';
+import { LogIn, LogOut, Pause, Play, Settings, Smartphone, Trophy, Tv, UserCog, Users, Zap } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useScrollDirection } from '@/hooks/useScrollDirection';
 import { fmtClock } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
 import type { AppMode } from '@/lib/types';
@@ -13,7 +16,7 @@ export const MODES: { id: AppMode; label: string; short: string; icon: typeof Tr
   { id: 'tv', label: 'TV Broadcast', short: 'TV', icon: Tv },
 ];
 
-const ROLE_LABEL = { viewer: 'Khán giả', scorekeeper: 'Trọng tài', organizer: 'BTC' } as const;
+const ROLE_LABEL = { viewer: 'Khán giả', scorekeeper: 'Trọng tài', organizer: 'BTC', admin: 'Admin' } as const;
 
 function useNow() {
   const [now, setNow] = useState<Date | null>(null);
@@ -36,11 +39,16 @@ function GoogleG() {
   );
 }
 
+/**
+ * Top header + mobile bottom tab bar, both auto-hiding on scroll (Facebook style).
+ * Guests (not signed in, or signed in without a staff role) get the header only:
+ * a single public page, no tab bar, and a subtle "Đăng nhập" button.
+ */
 export default function Navbar({
   mode, setMode, liveCount, auth, demo, setDemo, connected,
 }: {
-  mode: AppMode;
-  setMode: (m: AppMode) => void;
+  mode?: AppMode;
+  setMode?: (m: AppMode) => void;
   liveCount: number;
   auth: AuthState;
   demo?: boolean;
@@ -48,43 +56,57 @@ export default function Navbar({
   connected: boolean;
 }) {
   const now = useNow();
+  const router = useRouter();
   const [menu, setMenu] = useState(false);
-  const demoAllowed = process.env.NEXT_PUBLIC_ENABLE_DEMO === 'true' && auth.isStaff && setDemo;
+  const hidden = useScrollDirection({ disabled: menu });
+  const staff = auth.isStaff;
+  const demoAllowed = process.env.NEXT_PUBLIC_ENABLE_DEMO === 'true' && staff && setDemo;
+
+  const go = (m: AppMode) => {
+    setMenu(false);
+    if (setMode) setMode(m);
+    else router.push(m === 'viewer' ? '/' : `/?mode=${m}`);
+  };
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-[#374151]/70 bg-[#0B0F17]/90 backdrop-blur" style={{ top: 'env(safe-area-inset-top, 0px)' }}>
+      <header
+        className={`sticky z-40 border-b border-[#374151]/70 bg-[#0B0F17]/90 backdrop-blur transition-transform duration-300 will-change-transform ${hidden ? '-translate-y-full' : 'translate-y-0'}`}
+        style={{ top: 'env(safe-area-inset-top, 0px)' }}
+      >
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-2.5">
-          <div className="flex min-w-0 items-center gap-2.5">
+          <Link href="/" className="flex min-w-0 items-center gap-2.5" onClick={() => setMode?.('viewer')}>
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#A3E635] shadow-[0_0_24px_rgba(163,230,53,.35)]">
               <Zap className="h-5 w-5 text-[#0B0F17]" strokeWidth={3} />
             </span>
-            <div className="min-w-0 leading-none">
-              <div className="truncate pm-display text-lg font-extrabold uppercase italic text-white sm:text-xl">PickleMasters <span className="text-[#A3E635]">Live</span></div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="min-w-0 leading-none">
+              <span className="block truncate pm-display text-lg font-extrabold uppercase italic text-white sm:text-xl">PickleMasters <span className="text-[#A3E635]">Live</span></span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
                 <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-red-500 pm-pulse' : 'bg-slate-600'}`} />
                 {connected ? `${liveCount} sân live` : 'Đang kết nối…'} · <span className="pm-num">{now ? fmtClock(now) : '--:--:--'}</span>
+              </span>
+            </span>
+          </Link>
+
+          {staff && (
+            <nav className="ml-auto hidden md:block" aria-label="Chế độ">
+              <div className="flex gap-1 rounded-xl border border-[#374151] bg-[#111827] p-1">
+                {MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => go(m.id)}
+                    aria-current={mode === m.id ? 'page' : undefined}
+                    className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-lg px-3 pm-display text-sm font-bold uppercase transition ${mode === m.id ? 'bg-[#A3E635] text-[#0B0F17]' : 'text-slate-400 hover:bg-[#1F2937] hover:text-white'}`}
+                  >
+                    <m.icon className="h-4 w-4" /> {m.label}
+                  </button>
+                ))}
               </div>
-            </div>
-          </div>
+            </nav>
+          )}
 
-          <nav className="ml-auto hidden md:block" aria-label="Chế độ">
-            <div className="flex gap-1 rounded-xl border border-[#374151] bg-[#111827] p-1">
-              {MODES.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setMode(m.id)}
-                  aria-current={mode === m.id ? 'page' : undefined}
-                  className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-lg px-3 pm-display text-sm font-bold uppercase transition ${mode === m.id ? 'bg-[#A3E635] text-[#0B0F17]' : 'text-slate-400 hover:bg-[#1F2937] hover:text-white'}`}
-                >
-                  <m.icon className="h-4 w-4" /> {m.label}
-                </button>
-              ))}
-            </div>
-          </nav>
-
-          <div className="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
+          <div className={`ml-auto flex shrink-0 items-center gap-2 ${staff ? 'md:ml-0' : ''}`}>
             {demoAllowed && (
               <button
                 type="button"
@@ -110,17 +132,28 @@ export default function Navbar({
                     <img src={auth.profile.avatar_url} alt="" className="h-8 w-8 rounded-md object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#1F2937] pm-display text-sm font-bold text-[#A3E635]">
-                      {(auth.profile?.full_name || 'U').slice(0, 1)}
+                      {(auth.profile?.full_name || auth.email || 'U').slice(0, 1).toUpperCase()}
                     </span>
                   )}
-                  <span className={`rounded px-1.5 py-0.5 pm-display text-[10px] font-bold uppercase ${auth.isOrganizer ? 'bg-[#A3E635] text-[#0B0F17]' : auth.isStaff ? 'bg-[#06B6D4] text-[#0B0F17]' : 'bg-[#1F2937] text-slate-400'}`}>
+                  <span className={`rounded px-1.5 py-0.5 pm-display text-[10px] font-bold uppercase ${auth.isAdmin ? 'bg-[#F59E0B] text-[#0B0F17]' : auth.isOrganizer ? 'bg-[#A3E635] text-[#0B0F17]' : staff ? 'bg-[#06B6D4] text-[#0B0F17]' : 'bg-[#1F2937] text-slate-400'}`}>
                     {ROLE_LABEL[auth.role]}
                   </span>
                 </button>
                 {menu && (
-                  <div role="menu" className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-[#374151] bg-[#111827] p-2 shadow-2xl">
-                    <p className="truncate px-2 py-1.5 text-sm font-semibold text-white">{auth.profile?.full_name ?? auth.session.user.email}</p>
-                    <p className="truncate px-2 pb-2 text-xs text-slate-500">{auth.session.user.email}</p>
+                  <div role="menu" className="absolute right-0 top-12 z-50 w-60 rounded-xl border border-[#374151] bg-[#111827] p-2 shadow-2xl">
+                    <p className="truncate px-2 py-1.5 text-sm font-semibold text-white">{auth.profile?.full_name ?? auth.email}</p>
+                    <p className="truncate px-2 pb-2 text-xs text-slate-500">{auth.email}</p>
+                    {!staff && <p className="mx-2 mb-2 rounded-lg bg-[#0B0F17] p-2 text-xs text-slate-400">Gmail này chưa được cấp quyền BTC / Trọng tài. Hãy nhờ Admin thêm bạn.</p>}
+                    {auth.isOrganizer && (
+                      <Link href="/members" role="menuitem" onClick={() => setMenu(false)} className="flex min-h-[40px] items-center gap-2 rounded-lg px-2 text-sm text-slate-200 hover:bg-[#1F2937]">
+                        <Users className="h-4 w-4 text-[#06B6D4]" /> Quản lý thành viên
+                      </Link>
+                    )}
+                    {auth.isAdmin && (
+                      <Link href="/admin" role="menuitem" onClick={() => setMenu(false)} className="flex min-h-[40px] items-center gap-2 rounded-lg px-2 text-sm text-slate-200 hover:bg-[#1F2937]">
+                        <UserCog className="h-4 w-4 text-[#F59E0B]" /> Phân quyền (Admin)
+                      </Link>
+                    )}
                     <button
                       type="button"
                       role="menuitem"
@@ -137,34 +170,37 @@ export default function Navbar({
                 type="button"
                 onClick={() => void auth.signInWithGoogle()}
                 disabled={auth.loading}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-[#0B0F17] disabled:opacity-50"
+                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                title="Dành cho Ban tổ chức / Trọng tài"
               >
-                <GoogleG /> <span className="hidden sm:inline">Đăng nhập Google</span><LogIn className="h-4 w-4 sm:hidden" />
+                <GoogleG /> <span className="hidden sm:inline">Đăng nhập</span><LogIn className="h-4 w-4 sm:hidden" />
               </button>
             )}
           </div>
         </div>
       </header>
 
-      {/* Mobile bottom navigation — thumb zone */}
-      <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-[#374151] bg-[#0B0F17]/95 backdrop-blur md:hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-        aria-label="Chế độ"
-      >
-        <div className="grid grid-cols-4">
-          {MODES.map((m) => {
-            const on = mode === m.id;
-            return (
-              <button key={m.id} type="button" onClick={() => setMode(m.id)} aria-current={on ? 'page' : undefined} className="relative flex min-h-[62px] flex-col items-center justify-center gap-1">
-                {on && <span className="absolute top-0 h-[3px] w-10 rounded-b-full bg-[#A3E635]" />}
-                <m.icon className={`h-5 w-5 ${on ? 'text-[#A3E635]' : 'text-slate-500'}`} />
-                <span className={`pm-display text-[12px] font-bold uppercase ${on ? 'text-white' : 'text-slate-500'}`}>{m.short}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      {/* Mobile bottom tab bar — staff only, auto-hides on scroll */}
+      {staff && (
+        <nav
+          className={`fixed inset-x-0 bottom-0 z-40 border-t border-[#374151] bg-[#0B0F17]/95 backdrop-blur transition-transform duration-300 will-change-transform md:hidden ${hidden ? 'translate-y-full' : 'translate-y-0'}`}
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+          aria-label="Chế độ"
+        >
+          <div className="grid grid-cols-4">
+            {MODES.map((m) => {
+              const on = mode === m.id;
+              return (
+                <button key={m.id} type="button" onClick={() => go(m.id)} aria-current={on ? 'page' : undefined} className="relative flex min-h-[62px] flex-col items-center justify-center gap-1">
+                  {on && <span className="absolute top-0 h-[3px] w-10 rounded-b-full bg-[#A3E635]" />}
+                  <m.icon className={`h-5 w-5 ${on ? 'text-[#A3E635]' : 'text-slate-500'}`} />
+                  <span className={`pm-display text-[12px] font-bold uppercase ${on ? 'text-white' : 'text-slate-500'}`}>{m.short}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
     </>
   );
 }

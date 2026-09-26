@@ -10,9 +10,9 @@
 import { createBrowserClient } from '@supabase/ssr';
 import type { RealtimeChannel, RealtimePostgresChangesPayload, Session, SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { buildViewModel, computeStandings, groupsOfEvent, knockoutTies, qualifiersOf, stageName } from './engine';
+import { bracketFor, buildViewModel, computeStandings, groupsOfEvent, knockoutTies, podiumFor, qualifiersOf, stageName, type BracketVM } from './engine';
 import type {
-  EventVM, GroupTeamRow, MatchRow, PlayerRow, ProfileRow, StandingRow, TieBreaker, TournamentEventRow,
+  AppRole, EventVM, GroupTeamRow, MatchRow, PlayerRow, PodiumVM, ProfileRow, StandingRow, TieBreaker, TournamentEventRow,
   TournamentGroupRow, TournamentRow, TournamentVM,
 } from './types';
 
@@ -40,12 +40,13 @@ export interface TournamentSnapshot {
   groups: TournamentGroupRow[];
   teams: GroupTeamRow[];
   players: PlayerRow[];
+  participantIds: string[];
   matches: MatchRow[];
 }
 
 const EMPTY: TournamentSnapshot = {
   status: 'idle', error: null, connected: false, tournament: null,
-  events: [], groups: [], teams: [], players: [], matches: [],
+  events: [], groups: [], teams: [], players: [], participantIds: [], matches: [],
 };
 
 class TournamentStore {
@@ -96,13 +97,14 @@ class TournamentStore {
 
   async loadSetup() {
     const sb = getSupabase();
-    const [t, e, g, p] = await Promise.all([
+    const [t, e, g, p, tp] = await Promise.all([
       sb.from('tournaments').select('*').eq('id', this.id).single(),
       sb.from('tournament_events').select('*').eq('tournament_id', this.id).order('sort_order'),
       sb.from('tournament_groups').select('*').eq('tournament_id', this.id).order('sort_order'),
-      sb.from('players').select('*').order('rating', { ascending: false }),
+      sb.from('players').select('id, full_name, skill_rating, group_tag, gender, avatar_url, created_at').order('skill_rating', { ascending: false }),
+      sb.from('tournament_players').select('player_id').eq('tournament_id', this.id),
     ]);
-    const err = t.error || e.error || g.error || p.error;
+    const err = t.error || e.error || g.error || p.error || tp.error;
     if (err) throw err;
     const groupIds = ((g.data ?? []) as TournamentGroupRow[]).map((x) => x.id);
     const teams = groupIds.length
@@ -114,7 +116,8 @@ class TournamentStore {
       events: (e.data ?? []) as TournamentEventRow[],
       groups: (g.data ?? []) as TournamentGroupRow[],
       teams: (teams.data ?? []) as GroupTeamRow[],
-      players: ((p.data ?? []) as PlayerRow[]).map((x) => ({ ...x, rating: Number(x.rating) })),
+      players: ((p.data ?? []) as PlayerRow[]).map((x) => ({ ...x, skill_rating: Number(x.skill_rating) })),
+      participantIds: ((tp.data ?? []) as { player_id: string }[]).map((x) => x.player_id),
     });
   }
 
@@ -155,6 +158,7 @@ class TournamentStore {
         this.set({ tournament: p.new as TournamentRow }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament_events', filter: `tournament_id=eq.${this.id}` }, () => this.scheduleSetupReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament_groups', filter: `tournament_id=eq.${this.id}` }, () => this.scheduleSetupReload())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament_players', filter: `tournament_id=eq.${this.id}` }, () => this.scheduleSetupReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'group_teams' }, () => this.scheduleSetupReload())
       .subscribe((status: string) => {
         const connected = status === 'SUBSCRIBED';
@@ -213,8 +217,9 @@ export function useTournamentData(tournamentId: string | null | undefined) {
       teams: snap.teams,
       matches: snap.matches,
       players: snap.players,
+      participantIds: snap.participantIds,
     });
-  }, [snap.tournament, snap.events, snap.groups, snap.teams, snap.matches, snap.players]);
+  }, [snap.tournament, snap.events, snap.groups, snap.teams, snap.matches, snap.players, snap.participantIds]);
   return { vm, status: snap.status, error: snap.error, connected: snap.connected };
 }
 
@@ -225,6 +230,10 @@ export interface StandingsEngine {
   /** Name of the knockout stage the event feeds into (Bán kết, Chung kết…) */
   stageFor: (eventId: string) => string;
   knockoutFor: (eventId: string) => ReturnType<typeof knockoutTies>;
+  /** Semis → Final / Bronze, with projected pairings before the semis exist */
+  bracketFor: (eventId: string) => BracketVM | null;
+  /** Gold / Silver / Bronze of an event */
+  podiumFor: (eventId: string) => PodiumVM | null;
 }
 
 /** Standings calculated live from completed group matches, ordered by the tournament's tie-breaker rules. */
@@ -249,6 +258,14 @@ export function useStandingsEngine(tournamentId: string | null | undefined, over
       knockoutFor: (eventId) => {
         const ev = evOf(eventId);
         return vm && ev ? knockoutTies(vm, ev, order) : [];
+      },
+      bracketFor: (eventId) => {
+        const ev = evOf(eventId);
+        return vm && ev ? bracketFor(vm, ev, order) : null;
+      },
+      podiumFor: (eventId) => {
+        const ev = evOf(eventId);
+        return vm && ev ? podiumFor(vm, ev, order) : null;
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -279,31 +296,42 @@ export function useTournaments() {
 }
 
 /* ---------------------------- auth ---------------------------- */
+/**
+ * Google session + app role. The role comes from public.user_roles (by Gmail),
+ * resolved server-side by the my_role() SQL function.
+ */
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [role, setRole] = useState<AppRole>('viewer');
   const [loading, setLoading] = useState(true);
+
+  const loadIdentity = useCallback(async (s: Session | null) => {
+    const sb = getSupabase();
+    if (!s) { setProfile(null); setRole('viewer'); return; }
+    const [{ data: prof }, { data: r }] = await Promise.all([
+      sb.from('profiles').select('*').eq('id', s.user.id).maybeSingle(),
+      sb.rpc('my_role'),
+    ]);
+    setProfile((prof as ProfileRow) ?? null);
+    setRole(((r as string) || 'viewer') as AppRole);
+  }, []);
 
   useEffect(() => {
     const sb = getSupabase();
     let alive = true;
-    const loadProfile = async (s: Session | null) => {
-      if (!s) { setProfile(null); return; }
-      const { data } = await sb.from('profiles').select('*').eq('id', s.user.id).maybeSingle();
-      if (alive) setProfile((data as ProfileRow) ?? null);
-    };
     sb.auth.getSession().then(async ({ data }: { data: { session: Session | null } }) => {
       if (!alive) return;
       setSession(data.session);
-      await loadProfile(data.session);
-      setLoading(false);
+      await loadIdentity(data.session);
+      if (alive) setLoading(false);
     });
     const { data: sub } = sb.auth.onAuthStateChange((_e: string, s: Session | null) => {
       setSession(s);
-      void loadProfile(s);
+      void loadIdentity(s);
     });
     return () => { alive = false; sub.subscription.unsubscribe(); };
-  }, []);
+  }, [loadIdentity]);
 
   const signInWithGoogle = useCallback(async () => {
     const sb = getSupabase();
@@ -316,17 +344,20 @@ export function useAuth() {
   }, []);
 
   const signOut = useCallback(async () => { await getSupabase().auth.signOut(); }, []);
+  const refreshRole = useCallback(() => loadIdentity(session), [loadIdentity, session]);
 
-  const role = profile?.role ?? 'viewer';
   return {
     session,
     profile,
+    email: session?.user.email?.toLowerCase() ?? null,
     loading,
     role,
-    isOrganizer: role === 'organizer',
-    isStaff: role === 'organizer' || role === 'scorekeeper',
+    isAdmin: role === 'admin',
+    isOrganizer: role === 'admin' || role === 'organizer',
+    isStaff: role === 'admin' || role === 'organizer' || role === 'scorekeeper',
     signInWithGoogle,
     signOut,
+    refreshRole,
   };
 }
 

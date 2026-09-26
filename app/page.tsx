@@ -9,12 +9,14 @@ import RulesModal from '@/components/RulesModal';
 import ScorekeeperView from '@/components/ScorekeeperView';
 import TVBroadcastView from '@/components/TVBroadcastView';
 import { EmptyState } from '@/components/ui';
-import { finalizeMatch, matchAction, updateRules } from '@/lib/actions';
+import { finalizeMatch, matchAction, updateRules } from '@/lib/client-actions';
 import { isGameOver } from '@/lib/engine';
 import { useAuth, useTournamentData, useTournaments } from '@/lib/supabase';
 import type { AppMode, TournamentVM, UIState } from '@/lib/types';
 
 const INITIAL_UI: UIState = {
+  publicTab: 'live',
+  tvView: 'live',
   viewerEvent: null,
   viewerGroup: 'all',
   viewerMatchTab: 'live',
@@ -60,11 +62,20 @@ export default function Home() {
     window.scrollTo({ top: 0 });
   };
 
-  // Restore last mode
+  // Restore mode: ?mode= (links from /admin, /members) → last used
   useEffect(() => {
-    const m = safeGet('pm-mode') as AppMode | null;
+    const q = new URLSearchParams(window.location.search).get('mode') as AppMode | null;
+    const m = q ?? (safeGet('pm-mode') as AppMode | null);
     if (m && MODES.includes(m)) setModeState(m);
+    if (q) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('mode');
+      window.history.replaceState(null, '', url.toString());
+    }
   }, []);
+
+  // Guests (no staff role) only ever see the public page
+  const effectiveMode: AppMode = auth.isStaff ? mode : 'viewer';
 
   // Pick tournament: ?t= → last viewed → newest
   useEffect(() => {
@@ -81,7 +92,7 @@ export default function Home() {
     const url = new URL(window.location.href);
     url.searchParams.set('t', id);
     window.history.replaceState(null, '', url.toString());
-    setUiState((u) => ({ ...u, viewerEvent: null, viewerGroup: 'all', adminEvent: null, quickMatch: null, quickEvent: 'all', activeCourt: null, tvIdx: 0 }));
+    setUiState((u) => ({ ...u, publicTab: 'live', viewerEvent: null, viewerGroup: 'all', adminEvent: null, quickMatch: null, quickEvent: 'all', activeCourt: null, tvIdx: 0, tvView: 'live' }));
     setGroupDrafts({});
   };
 
@@ -132,18 +143,18 @@ export default function Home() {
       </EmptyState>
     );
   } else if (!vm) {
-    content = mode === 'admin' ? (
+    content = effectiveMode === 'admin' ? (
       <AdminDashboard vm={null} auth={auth} ui={ui} setUi={setUi} openRules={() => setRulesOpen(true)} toast={toast} groupDrafts={groupDrafts} setGroupDrafts={setGroupDrafts} onSelectTournament={selectTournament} />
     ) : (
       <EmptyState icon={Trophy} title="Chưa có giải đấu nào">
         <p>Ban tổ chức đăng nhập và vào tab “Ban tổ chức” để tạo giải đầu tiên.</p>
       </EmptyState>
     );
-  } else if (mode === 'viewer') {
+  } else if (effectiveMode === 'viewer') {
     content = <PublicView vm={vm} tournaments={tournaments} onSelectTournament={selectTournament} ui={ui} setUi={setUi} openRules={() => setRulesOpen(true)} />;
-  } else if (mode === 'admin') {
+  } else if (effectiveMode === 'admin') {
     content = <AdminDashboard vm={vm} auth={auth} ui={ui} setUi={setUi} openRules={() => setRulesOpen(true)} toast={toast} groupDrafts={groupDrafts} setGroupDrafts={setGroupDrafts} onSelectTournament={selectTournament} />;
-  } else if (mode === 'score') {
+  } else if (effectiveMode === 'score') {
     content = <ScorekeeperView vm={vm} auth={auth} ui={ui} setUi={setUi} toast={toast} />;
   } else {
     content = <TVBroadcastView vm={vm} ui={ui} setUi={setUi} demo={demo} setDemo={auth.isStaff ? setDemo : undefined} />;
@@ -151,9 +162,9 @@ export default function Home() {
 
   return (
     <div className="pm-root min-h-screen bg-[#0B0F17] text-slate-200">
-      <Navbar mode={mode} setMode={setMode} liveCount={liveCount} auth={auth} demo={demo} setDemo={setDemo} connected={connected || !vm} />
+      <Navbar mode={effectiveMode} setMode={setMode} liveCount={liveCount} auth={auth} demo={demo} setDemo={setDemo} connected={connected || !vm} />
 
-      <main className="mx-auto max-w-7xl px-4 pb-28 pt-4 md:pb-10 md:pt-6">{content}</main>
+      <main className={`mx-auto max-w-7xl px-4 pt-4 md:pb-10 md:pt-6 ${auth.isStaff ? 'pb-28' : 'pb-12'}`}>{content}</main>
 
       {vm && (
         <RulesModal

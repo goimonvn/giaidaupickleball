@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, Clock, Target } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Clock, Target, Trophy } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { fmtDiff, MATCH_TYPE_LABEL, MATCH_TYPE_SHORT, teamAvg, teamName } from '@/lib/engine';
 import type { EventVM, KnockoutSeed, MatchVM, PlayerRow, StandingRow, TournamentVM } from '@/lib/types';
@@ -148,5 +148,77 @@ export function MatchRow({ m, vm, onClick, selected }: { m: MatchVM; vm: Tournam
     <button type="button" onClick={onClick} className={`${cls} hover:border-slate-500`}>{inner}</button>
   ) : (
     <div className={cls}>{inner}</div>
+  );
+}
+
+/* ---------------------------- Knockout bracket ---------------------------- */
+function BracketSlot({ label, match, seeds, vm }: { label: string; match?: MatchVM; seeds?: KnockoutSeed[]; vm: TournamentVM }) {
+  const rows = match
+    ? [
+        { team: vm.teams.find((t) => t.id === match.a), score: match.sa, win: match.status === 'completed' && match.sa > match.sb },
+        { team: vm.teams.find((t) => t.id === match.b), score: match.sb, win: match.status === 'completed' && match.sb > match.sa },
+      ]
+    : (seeds ?? [undefined, undefined]).map((s) => ({ team: s?.team, score: null as number | null, win: false, seed: s?.label }));
+  const live = match?.status === 'live';
+  return (
+    <div className={`w-full overflow-hidden rounded-xl border ${live ? 'border-red-500/50' : match?.status === 'completed' ? 'border-[#374151]' : 'border-dashed border-[#374151]'} bg-[#0B0F17]`}>
+      <div className="flex items-center justify-between bg-[#111827] px-3 py-1.5 pm-display text-[11px] font-bold uppercase tracking-wider text-slate-500">
+        <span>{label}</span>
+        {live ? <LiveBadge /> : match?.status === 'completed' ? <CheckCircle2 className="h-3.5 w-3.5 text-[#A3E635]" /> : match ? <span className="text-[#06B6D4]">{match.time}</span> : <span>Dự kiến</span>}
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} className={`flex min-h-[44px] items-center gap-2 px-3 ${i ? 'border-t border-[#374151]/60' : ''} ${r.win ? 'bg-[#A3E635]/[0.07]' : ''}`}>
+          {'seed' in r && r.seed && <span className="w-7 pm-num text-xs font-extrabold text-[#F59E0B]">{r.seed}</span>}
+          <span className={`min-w-0 flex-1 truncate text-sm ${r.win ? 'font-bold text-white' : r.team ? 'text-slate-200' : 'text-slate-600'}`}>
+            {r.team ? teamName(r.team, vm.players) : 'Chờ xác định'}
+          </span>
+          {r.score != null && match?.status !== 'upcoming' && (
+            <span className={`pm-num text-lg font-extrabold ${r.win ? 'text-[#A3E635]' : 'text-slate-500'}`}>{r.score}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Semis → Final + Bronze. Shows projected seeds until the knockout matches exist. */
+export function KnockoutBracket({ bracket, vm, stage }: {
+  bracket: { semis: MatchVM[]; final?: MatchVM; bronze?: MatchVM; projected: KnockoutSeed[][] };
+  vm: TournamentVM;
+  stage: string;
+}) {
+  const { semis, final, bronze, projected } = bracket;
+  const semiSlots = semis.length ? semis.map((m, i) => ({ key: m.id, match: m, label: `Bán kết ${i + 1}` }))
+    : projected.length === 2 ? projected.map((s, i) => ({ key: `p${i}`, seeds: s, label: `${stage} ${i + 1}` })) : [];
+  const finalSeeds = !semis.length && projected.length === 1 ? projected[0] : undefined;
+
+  if (!semiSlots.length && !final && !finalSeeds) {
+    return <p className="p-6 text-center text-sm text-slate-500">Nội dung này chưa có vòng loại trực tiếp.</p>;
+  }
+  return (
+    <div className="grid gap-4 p-3 md:grid-cols-[1fr_auto_1fr] md:items-center">
+      {semiSlots.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <p className="pm-display text-xs font-bold uppercase tracking-wider text-slate-500">Bán kết</p>
+          {semiSlots.map((s) => <BracketSlot key={s.key} label={s.label} match={'match' in s ? s.match : undefined} seeds={'seeds' in s ? s.seeds : undefined} vm={vm} />)}
+        </div>
+      )}
+      {semiSlots.length > 0 && (
+        <div className="flex items-center justify-center text-slate-600" aria-hidden="true">
+          <ChevronRight className="hidden h-6 w-6 md:block" />
+          <ChevronDown className="h-6 w-6 md:hidden" />
+        </div>
+      )}
+      <div className="flex flex-col gap-3">
+        <p className="flex items-center gap-1.5 pm-display text-xs font-bold uppercase tracking-wider text-[#F59E0B]"><Trophy className="h-3.5 w-3.5" /> Chung kết</p>
+        <BracketSlot label="Chung kết" match={final} seeds={finalSeeds} vm={vm} />
+        {(bronze || semiSlots.length > 0) && (
+          <>
+            <p className="pm-display text-xs font-bold uppercase tracking-wider text-slate-500">Tranh hạng Ba</p>
+            <BracketSlot label="Tranh hạng 3" match={bronze} vm={vm} />
+          </>
+        )}
+      </div>
+    </div>
   );
 }

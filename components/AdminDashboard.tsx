@@ -1,19 +1,20 @@
 'use client';
 
 import {
-  CheckCircle2, ChevronRight, Hand, LayoutGrid, Lock, Play, Plus, RefreshCw, Scale, Settings, Shield,
-  Shuffle, Trash2, Trophy, Users, X, Zap,
+  CheckCircle2, ChevronRight, Crown, Flag, Hand, LayoutGrid, Lock, LockOpen, Medal, Play, Plus, RefreshCw, Scale,
+  Settings, Shield, Shuffle, Trophy, UserCog, Users, X, Zap,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
-import {
-  addPlayer, applyEventSetup, createKnockout, createTournament, deletePlayer, updateRules,
-} from '@/lib/actions';
+import Link from 'next/link';
+import { useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { completeTournament, createFinals, createTournament, reopenTournament, setTournamentParticipants } from '@/lib/actions';
+import { applyEventSetup, createKnockout, refreshTournament, updateRules } from '@/lib/client-actions';
 import {
   GROUP_LETTERS, generatePairs, groupsOfEvent, qualifiersOf, snakeAssign, stageName, stageType, teamAvg, teamName,
   type DraftTeam,
 } from '@/lib/engine';
 import { useStandingsEngine, type AuthState } from '@/lib/supabase';
 import type { EventVM, PlayerRow, TieBreaker, TournamentVM, UIState } from '@/lib/types';
+import MemberPicker from './MemberPicker';
 import { TieBreakerList } from './RulesModal';
 import { KnockoutPreview, StandingsList } from './Standings';
 import { Card, ConfirmBar, EmptyState, GroupBadge, SectionTitle, Segmented, Toggle } from './ui';
@@ -49,13 +50,14 @@ const EVENT_PRESETS = [
   { code: 'donu', name: 'Đơn Nữ', short: 'ĐƠN NỮ', singles: true },
 ];
 
-function TournamentCreator({ onCreated, toast }: { onCreated: (id: string) => void; toast: Toast }) {
+function TournamentCreator({ players, onCreated, toast }: { players: PlayerRow[]; onCreated: (id: string) => void; toast: Toast }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [venue, setVenue] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [courts, setCourts] = useState(2);
   const [events, setEvents] = useState<string[]>(['dn', 'dnn', 'don']);
+  const [playerIds, setPlayerIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const inputCls = 'min-h-[44px] w-full rounded-xl border border-[#374151] bg-[#0B0F17] px-3 text-sm text-white placeholder:text-slate-600';
 
@@ -63,23 +65,21 @@ function TournamentCreator({ onCreated, toast }: { onCreated: (id: string) => vo
     e.preventDefault();
     if (title.trim().length < 3 || !events.length) return;
     setBusy(true);
-    try {
-      const t = await createTournament({
-        title: title.trim(),
-        venue: venue.trim(),
-        startsAt: startsAt ? new Date(startsAt).toISOString() : null,
-        courts: Array.from({ length: courts }, (_, i) => `Sân ${i + 1}`),
-        events: EVENT_PRESETS.filter((p) => events.includes(p.code)),
-      });
-      toast(`Đã tạo giải "${t.title}"`);
-      setOpen(false);
-      setTitle('');
-      onCreated(t.id);
-    } catch (err) {
-      toast((err as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
+    const res = await createTournament({
+      title: title.trim(),
+      venue: venue.trim(),
+      startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+      courts: Array.from({ length: courts }, (_, i) => `Sân ${i + 1}`),
+      events: EVENT_PRESETS.filter((p) => events.includes(p.code)),
+      playerIds,
+    });
+    setBusy(false);
+    if (!res.ok) { toast(res.error, 'error'); return; }
+    toast(`Đã tạo giải "${res.data.title}" với ${playerIds.length} VĐV`);
+    setOpen(false);
+    setTitle('');
+    setPlayerIds([]);
+    onCreated(res.data.id);
   };
 
   return (
@@ -132,8 +132,15 @@ function TournamentCreator({ onCreated, toast }: { onCreated: (id: string) => vo
               })}
             </div>
           </div>
+          <div className="sm:col-span-2">
+            <p className="mb-1.5 flex items-center justify-between text-xs text-slate-500">
+              <span>VĐV tham gia (chọn từ danh sách thành viên)</span>
+              <Link href="/members" className="font-semibold text-[#06B6D4]">Quản lý thành viên</Link>
+            </p>
+            <MemberPicker players={players} selected={playerIds} onChange={setPlayerIds} idPrefix="pm-create" />
+          </div>
           <button type="submit" disabled={busy || title.trim().length < 3 || !events.length} className="min-h-[48px] rounded-xl bg-[#A3E635] pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-40 sm:col-span-2">
-            {busy ? 'Đang tạo…' : 'Tạo giải đấu'}
+            {busy ? 'Đang tạo…' : `Tạo giải đấu${playerIds.length ? ` · ${playerIds.length} VĐV` : ''}`}
           </button>
         </form>
       )}
@@ -144,7 +151,8 @@ function TournamentCreator({ onCreated, toast }: { onCreated: (id: string) => vo
 /* ======================= Step 1 — pair generator ======================= */
 function PairGenerator({ vm, ev, draft, clearDraft, toast }: { vm: TournamentVM; ev: EventVM; draft: GroupDraft; clearDraft: () => void; toast: Toast }) {
   const singles = ev.singles;
-  const players = vm.players;
+  // Pool = members registered for this tournament (or everyone when none registered yet)
+  const players = vm.participantIds.length ? vm.players.filter((p) => vm.participantIds.includes(p.id)) : vm.players;
   const [method, setMethod] = useState<'skill' | 'club' | 'manual'>('skill');
   const [pool, setPool] = useState<'M' | 'F' | 'all'>(ev.code === 'dnn' ? 'all' : 'M');
   const [manualPairs, setManualPairs] = useState<PlayerRow[][]>([]);
@@ -233,7 +241,7 @@ function PairGenerator({ vm, ev, draft, clearDraft, toast }: { vm: TournamentVM;
       {!singles && method === 'manual' && (
         <div className="rounded-xl border border-dashed border-[#374151] p-3">
           <p className="mb-2 text-xs text-slate-400">
-            {pick ? <>Đã chọn <b className="text-[#A3E635]">{pick.name}</b>. Chọn người đánh cặp.</> : 'Chạm VĐV thứ nhất, rồi VĐV thứ hai để ghép cặp.'}
+            {pick ? <>Đã chọn <b className="text-[#A3E635]">{pick.full_name}</b>. Chọn người đánh cặp.</> : 'Chạm VĐV thứ nhất, rồi VĐV thứ hai để ghép cặp.'}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {poolPlayers.map((p) => {
@@ -247,7 +255,7 @@ function PairGenerator({ vm, ev, draft, clearDraft, toast }: { vm: TournamentVM;
                   onClick={() => clickManual(p)}
                   className={`min-h-[36px] rounded-lg border px-2.5 text-xs font-semibold transition ${sel ? 'border-[#A3E635] bg-[#A3E635] text-[#0B0F17]' : used ? 'border-transparent bg-[#1F2937] text-slate-600 line-through' : 'border-[#374151] bg-[#0B0F17] text-slate-200'}`}
                 >
-                  {p.name} <span className="opacity-70">{p.rating.toFixed(1)}</span>
+                  {p.full_name} <span className="opacity-70">{p.skill_rating.toFixed(1)}</span>
                 </button>
               );
             })}
@@ -256,7 +264,7 @@ function PairGenerator({ vm, ev, draft, clearDraft, toast }: { vm: TournamentVM;
             <div className="mt-3 flex flex-wrap gap-1.5">
               {manualPairs.map((pr, i) => (
                 <span key={i} className="inline-flex items-center gap-1 rounded-lg bg-[#06B6D4]/15 py-1 pl-2.5 pr-1 text-xs font-semibold text-cyan-300">
-                  {pr[0].name} + {pr[1].name}
+                  {pr[0].full_name} + {pr[1].full_name}
                   <button type="button" aria-label="Bỏ cặp" onClick={() => setManualPairs(manualPairs.filter((_, j) => j !== i))} className="flex h-7 w-7 items-center justify-center hover:text-white"><X className="h-3.5 w-3.5" /></button>
                 </span>
               ))}
@@ -284,10 +292,10 @@ function PairGenerator({ vm, ev, draft, clearDraft, toast }: { vm: TournamentVM;
                 <div key={i} className="flex items-center gap-3 rounded-xl border border-[#374151] bg-[#0B0F17] px-3 py-2">
                   <span className="pm-num text-lg font-extrabold text-slate-600">{String(i + 1).padStart(2, '0')}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-white">{pr.map((p) => p.name).join(' + ')}</div>
-                    <div className="truncate text-[11px] text-slate-500">{pr.map((p) => `${p.rating.toFixed(1)} · ${p.group_tag}`).join('  /  ')}</div>
+                    <div className="truncate text-sm font-semibold text-white">{pr.map((p) => p.full_name).join(' + ')}</div>
+                    <div className="truncate text-[11px] text-slate-500">{pr.map((p) => `${p.skill_rating.toFixed(1)} · ${p.group_tag}`).join('  /  ')}</div>
                   </div>
-                  <span className="pm-num text-base font-bold text-[#06B6D4]">{(pr.reduce((s, p) => s + p.rating, 0) / pr.length).toFixed(2)}</span>
+                  <span className="pm-num text-base font-bold text-[#06B6D4]">{(pr.reduce((s, p) => s + p.skill_rating, 0) / pr.length).toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -479,109 +487,123 @@ function GroupStagePanel({ vm, ev, draft, setDraft, clearDraft, toast }: { vm: T
   );
 }
 
-/* ======================= Roster ======================= */
-function RosterManager({ vm, toast }: { vm: TournamentVM; toast: Toast }) {
-  const players = vm.players;
-  const tags = useMemo(() => Array.from(new Set(players.map((p) => p.group_tag))).sort(), [players]);
-  const [tagFilter, setTagFilter] = useState('all');
-  const [form, setForm] = useState({ name: '', rating: '3.5', group_tag: tags[0] ?? 'Nhóm Cầu Giấy', gender: 'M' as 'M' | 'F' });
-  const [open, setOpen] = useState(false);
+/* ======================= Participants (from member database) ======================= */
+function ParticipantsPanel({ vm, toast }: { vm: TournamentVM; toast: Toast }) {
+  const [selected, setSelected] = useState<string[]>(vm.participantIds);
   const [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const shown = players.filter((p) => tagFilter === 'all' || p.group_tag === tagFilter);
+  useEffect(() => { setSelected(vm.participantIds); }, [vm.participantIds]);
+  const dirty = selected.length !== vm.participantIds.length || selected.some((id) => !vm.participantIds.includes(id));
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const name = form.name.trim();
-    const rating = parseFloat(form.rating);
-    if (!name || Number.isNaN(rating)) return;
+  const save = async () => {
     setBusy(true);
-    try {
-      await addPlayer({ name, rating, group_tag: form.group_tag.trim() || 'Tự do', gender: form.gender }, vm.tournament.id);
-      setForm({ ...form, name: '' });
-      toast(`Đã thêm VĐV ${name}`);
-    } catch (err) {
-      toast((err as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
+    const res = await setTournamentParticipants(vm.tournament.id, selected);
+    setBusy(false);
+    if (!res.ok) { toast(res.error, 'error'); return; }
+    await refreshTournament(vm.tournament.id);
+    toast(`Đã lưu ${res.data} VĐV tham gia giải`);
   };
-
-  const remove = async (p: PlayerRow) => {
-    try {
-      await deletePlayer(p.id, vm.tournament.id);
-      toast(`Đã xoá ${p.name}`);
-    } catch (err) {
-      toast((err as Error).message, 'error');
-    } finally {
-      setConfirmDelete(null);
-    }
-  };
-
-  const inputCls = 'min-h-[44px] w-full rounded-xl border border-[#374151] bg-[#0B0F17] px-3 text-sm text-white placeholder:text-slate-600';
 
   return (
     <Card>
-      <SectionTitle icon={Users} eyebrow="Danh sách VĐV" right={
-        <button type="button" onClick={() => setOpen(!open)} className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#06B6D4] px-3 text-sm font-bold text-[#0B0F17]">
-          {open ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />} {open ? 'Đóng' : 'Thêm VĐV'}
-        </button>
-      }>
-        {players.length} vận động viên
+      <SectionTitle
+        icon={Users}
+        eyebrow="VĐV tham gia giải"
+        right={<Link href="/members" className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300">Thành viên <ChevronRight className="h-4 w-4" /></Link>}
+      >
+        {vm.participantIds.length || 'Chưa chọn'} VĐV
       </SectionTitle>
-      {open && (
-        <form onSubmit={submit} className="grid grid-cols-2 gap-2 border-b border-[#374151]/70 p-4 sm:grid-cols-5">
-          <div className="col-span-2">
-            <label htmlFor="pm-new-name" className="mb-1 block text-xs text-slate-500">Họ tên</label>
-            <input id="pm-new-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Quang Vinh" className={inputCls} />
-          </div>
-          <div>
-            <label htmlFor="pm-new-rating" className="mb-1 block text-xs text-slate-500">Trình (DUPR)</label>
-            <input id="pm-new-rating" type="number" inputMode="decimal" step="0.1" min="1" max="8" value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })} className={inputCls} />
-          </div>
-          <div>
-            <label htmlFor="pm-new-gender" className="mb-1 block text-xs text-slate-500">Giới tính</label>
-            <select id="pm-new-gender" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as 'M' | 'F' })} className={inputCls}>
-              <option value="M">Nam</option><option value="F">Nữ</option>
-            </select>
-          </div>
-          <div className="col-span-2 sm:col-span-1">
-            <label htmlFor="pm-new-tag" className="mb-1 block text-xs text-slate-500">Nhóm</label>
-            <input id="pm-new-tag" list="pm-tags" value={form.group_tag} onChange={(e) => setForm({ ...form, group_tag: e.target.value })} className={inputCls} />
-            <datalist id="pm-tags">{tags.map((t) => <option key={t} value={t} />)}</datalist>
-          </div>
-          <button type="submit" disabled={busy} className="col-span-2 min-h-[48px] rounded-xl bg-[#A3E635] pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-50 sm:col-span-5">
-            {busy ? 'Đang lưu…' : 'Lưu VĐV'}
+      <div className="flex flex-col gap-3 p-4">
+        <p className="text-sm text-slate-400">
+          Bước 1 chỉ ghép cặp trong danh sách này. Nếu chưa chọn ai, hệ thống dùng toàn bộ thành viên.
+        </p>
+        <MemberPicker players={vm.players} selected={selected} onChange={setSelected} disabled={vm.locked} idPrefix="pm-part" />
+        {!vm.locked && (
+          <button type="button" disabled={!dirty || busy} onClick={() => void save()} className="min-h-[48px] rounded-xl bg-[#A3E635] pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-40">
+            {busy ? 'Đang lưu…' : dirty ? `Lưu danh sách (${selected.length})` : 'Đã lưu'}
           </button>
-        </form>
-      )}
-      <div className="p-3">
-        <Segmented full size="sm" value={tagFilter} onChange={setTagFilter} options={[{ id: 'all', label: 'Tất cả' }, ...tags.map((t) => ({ id: t, label: t.replace(/^Nhóm /, '') }))]} />
+        )}
       </div>
-      <ul className="grid gap-px overflow-hidden rounded-b-2xl bg-[#374151]/40 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((p, i) => (
-          <li key={p.id} className="flex min-h-[60px] items-center gap-3 bg-[#111827] px-4 py-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1F2937] pm-num text-sm font-extrabold text-[#A3E635]">{p.rating.toFixed(1)}</span>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-white">{p.name} <span className="text-xs font-normal text-slate-500">· {p.gender === 'M' ? 'Nam' : 'Nữ'}</span></div>
-              <div className="mt-1 flex items-center gap-2">
-                <span className={`shrink-0 rounded px-1.5 py-px text-[10px] font-semibold ${tags.indexOf(p.group_tag) % 2 === 0 ? 'bg-[#06B6D4]/15 text-cyan-300' : 'bg-[#F59E0B]/15 text-amber-300'}`}>{p.group_tag}</span>
-                <span className="h-1 flex-1 overflow-hidden rounded-full bg-[#1F2937]"><span className="block h-full rounded-full bg-[#A3E635]" style={{ width: `${Math.min(100, ((p.rating - 2) / 3) * 100)}%` }} /></span>
-              </div>
-            </div>
-            {confirmDelete === p.id ? (
-              <span className="flex shrink-0 gap-1">
-                <button type="button" onClick={() => setConfirmDelete(null)} className="h-10 rounded-lg px-2 text-xs text-slate-400">Huỷ</button>
-                <button type="button" onClick={() => void remove(p)} className="h-10 rounded-lg bg-rose-500/20 px-2 text-xs font-bold text-rose-300">Xoá</button>
-              </span>
-            ) : (
-              <button type="button" aria-label={`Xoá ${p.name}`} data-idx={i} onClick={() => setConfirmDelete(p.id)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-rose-500/10 hover:text-rose-400">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            )}
-          </li>
+    </Card>
+  );
+}
+
+/* ======================= Tournament lifecycle ======================= */
+function LifecyclePanel({ vm, auth, toast }: { vm: TournamentVM; auth: AuthState; toast: Toast }) {
+  const engine = useStandingsEngine(vm.tournament.id);
+  const [confirm, setConfirm] = useState<'close' | 'reopen' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const unfinished = vm.matches.filter((m) => m.status !== 'completed').length;
+  const live = vm.matches.filter((m) => m.status === 'live').length;
+
+  const finalsReady = vm.events
+    .map((ev) => ({ ev, br: engine.bracketFor(ev.id) }))
+    .filter((x) => x.br?.canCreateFinals);
+
+  const run = async (key: string, fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
+    setBusy(key);
+    const res = await fn();
+    setBusy(null);
+    setConfirm(null);
+    if (!res.ok) { toast(res.error ?? 'Có lỗi xảy ra', 'error'); return; }
+    await refreshTournament(vm.tournament.id);
+    toast(okMsg);
+  };
+
+  return (
+    <Card>
+      <SectionTitle icon={Flag} eyebrow="Vòng đời giải đấu">
+        {vm.locked ? 'Giải đã kết thúc' : 'Loại trực tiếp & kết thúc giải'}
+      </SectionTitle>
+      <div className="flex flex-col gap-3 p-4">
+        {!vm.locked && finalsReady.map(({ ev }) => (
+          <div key={ev.id} className="flex flex-col gap-2 rounded-xl border border-[#A3E635]/40 bg-[#A3E635]/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-200"><b className="text-white">{ev.label}</b>: 2 trận Bán kết đã xong.</p>
+            <button
+              type="button"
+              disabled={busy === ev.id}
+              onClick={() => void run(ev.id, () => createFinals(ev.id), `Đã tạo Chung kết & Tranh hạng Ba · ${ev.label}`)}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#A3E635] px-4 pm-display text-sm font-bold uppercase text-[#0B0F17] disabled:opacity-50"
+            >
+              <Medal className="h-4 w-4" /> {busy === ev.id ? 'Đang tạo…' : 'Tạo trận Chung kết & Tranh Hạng Ba'}
+            </button>
+          </div>
         ))}
-      </ul>
+
+        {vm.locked ? (
+          <>
+            <p className="flex items-center gap-2 rounded-xl bg-[#0B0F17] px-3 py-3 text-sm text-slate-300">
+              <Lock className="h-4 w-4 shrink-0 text-[#F59E0B]" /> Kết quả đã khoá. Khán giả xem được Bảng Vàng Vinh Danh.
+            </p>
+            {auth.isAdmin && (confirm === 'reopen' ? (
+              <ConfirmBar
+                text="Mở lại giải để sửa kết quả? Trọng tài sẽ nhập điểm lại được."
+                onCancel={() => setConfirm(null)}
+                onConfirm={() => void run('reopen', () => reopenTournament(vm.tournament.id), 'Đã mở lại giải đấu')}
+                confirmLabel="Mở lại giải"
+                busy={busy === 'reopen'}
+              />
+            ) : (
+              <button type="button" onClick={() => setConfirm('reopen')} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-[#374151] text-sm font-semibold text-slate-300">
+                <LockOpen className="h-4 w-4" /> Mở lại giải (Admin)
+              </button>
+            ))}
+          </>
+        ) : confirm === 'close' ? (
+          <ConfirmBar
+            text={unfinished
+              ? `Còn ${unfinished} trận chưa có kết quả${live ? ` (${live} trận đang đấu)` : ''}. Sau khi đóng, không ai sửa được điểm nữa.`
+              : 'Đóng giải và khoá toàn bộ kết quả? Bảng Vàng Vinh Danh sẽ hiện cho khán giả.'}
+            onCancel={() => setConfirm(null)}
+            onConfirm={() => void run('close', () => completeTournament(vm.tournament.id), 'Đã kết thúc giải đấu. Bảng Vàng đã mở!')}
+            confirmLabel="Đóng giải"
+            busy={busy === 'close'}
+          />
+        ) : (
+          <button type="button" onClick={() => setConfirm('close')} className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl border border-rose-500/60 pm-display text-base font-bold uppercase text-rose-300 hover:bg-rose-500/10">
+            <Lock className="h-4 w-4" /> Đóng / Kết thúc Giải đấu
+          </button>
+        )}
+      </div>
     </Card>
   );
 }
@@ -607,7 +629,7 @@ export default function AdminDashboard({
   if (!auth.isOrganizer) {
     return (
       <EmptyState icon={Lock} title="Dành cho Ban tổ chức">
-        <p>Đăng nhập bằng tài khoản Google đã được cấp quyền BTC để tạo giải, ghép cặp, chia bảng và chỉnh luật.</p>
+        <p>Đăng nhập bằng Gmail đã được Admin cấp quyền BTC để tạo giải, ghép cặp, chia bảng và chỉnh luật.</p>
         {!auth.session && (
           <button type="button" onClick={() => void auth.signInWithGoogle()} className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-[#0B0F17]">
             Đăng nhập Google <ChevronRight className="h-4 w-4" />
@@ -620,24 +642,31 @@ export default function AdminDashboard({
   const header = (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#06B6D4]">Ban Tổ Chức</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#06B6D4]">{auth.isAdmin ? 'Admin · Ban Tổ Chức' : 'Ban Tổ Chức'}</p>
         <h2 className="pm-display text-3xl font-extrabold uppercase leading-none text-white">Thiết lập giải</h2>
       </div>
-      {vm && (
-        <button type="button" onClick={openRules} className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[#374151] bg-[#1F2937] px-3 text-sm font-semibold text-white hover:border-[#A3E635]">
-          <Settings className="h-4 w-4 text-[#A3E635]" /> {vm.rules.target} điểm · cách {vm.rules.winBy}
-        </button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        <Link href="/members" className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[#374151] bg-[#1F2937] px-3 text-sm font-semibold text-white hover:border-[#A3E635]">
+          <Users className="h-4 w-4 text-[#06B6D4]" /> Thành viên
+        </Link>
+        {auth.isAdmin && (
+          <Link href="/admin" className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[#374151] bg-[#1F2937] px-3 text-sm font-semibold text-white hover:border-[#A3E635]">
+            <UserCog className="h-4 w-4 text-[#F59E0B]" /> Phân quyền
+          </Link>
+        )}
+        {vm && (
+          <button type="button" onClick={openRules} className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[#374151] bg-[#1F2937] px-3 text-sm font-semibold text-white hover:border-[#A3E635]">
+            <Settings className="h-4 w-4 text-[#A3E635]" /> {vm.rules.target} điểm · cách {vm.rules.winBy}
+          </button>
+        )}
+      </div>
     </div>
   );
 
+  const creator = <TournamentCreator players={vm?.players ?? []} onCreated={onSelectTournament} toast={toast} />;
+
   if (!vm) {
-    return (
-      <div className="flex flex-col gap-4">
-        {header}
-        <TournamentCreator onCreated={onSelectTournament} toast={toast} />
-      </div>
-    );
+    return <div className="flex flex-col gap-4">{header}{creator}</div>;
   }
 
   const ev = vm.events.find((e) => e.id === ui.adminEvent) ?? vm.events[0];
@@ -646,11 +675,18 @@ export default function AdminDashboard({
     try { await updateRules(vm.tournament, { tieBreakers: o }); } catch (e) { toast((e as Error).message, 'error'); } finally { setTbBusy(false); }
   };
 
+  const lockedBanner = vm.locked && (
+    <div className="flex items-center gap-3 rounded-2xl border border-[#F59E0B]/50 bg-[#F59E0B]/10 px-4 py-3 text-sm text-amber-100">
+      <Crown className="h-5 w-5 shrink-0 text-[#F59E0B]" />
+      Giải “{vm.tournament.title}” đã kết thúc. Thiết lập và kết quả đang bị khoá.
+    </div>
+  );
+
   if (!ev) {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <TournamentCreator onCreated={onSelectTournament} toast={toast} />
+        {creator}
         <Card className="p-6 text-sm text-slate-400">Giải này chưa có nội dung thi đấu.</Card>
       </div>
     );
@@ -684,30 +720,33 @@ export default function AdminDashboard({
   return (
     <div className="flex flex-col gap-4">
       {header}
-      <TournamentCreator onCreated={onSelectTournament} toast={toast} />
+      {lockedBanner}
+      {creator}
 
       <div>
         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Nội dung đang thiết lập · {vm.tournament.title}</p>
         <Segmented full value={ev.id} onChange={(v) => setUi({ adminEvent: v })} options={vm.events.map((e) => ({ id: e.id, label: e.label }))} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <SectionTitle icon={Users} eyebrow="Bước 1">Ghép cặp / danh sách</SectionTitle>
-          <PairGenerator key={ev.id} vm={vm} ev={ev} draft={draft} clearDraft={clearDraft} toast={toast} />
-        </Card>
-        <Card>
-          <SectionTitle icon={LayoutGrid} eyebrow="Bước 2">Chia bảng</SectionTitle>
-          <GroupStagePanel key={ev.id} vm={vm} ev={ev} draft={draft} setDraft={setDraft} clearDraft={clearDraft} toast={toast} />
-        </Card>
-      </div>
+      {!vm.locked && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <SectionTitle icon={Users} eyebrow="Bước 1">Ghép cặp / danh sách</SectionTitle>
+            <PairGenerator key={ev.id} vm={vm} ev={ev} draft={draft} clearDraft={clearDraft} toast={toast} />
+          </Card>
+          <Card>
+            <SectionTitle icon={LayoutGrid} eyebrow="Bước 2">Chia bảng</SectionTitle>
+            <GroupStagePanel key={ev.id} vm={vm} ev={ev} draft={draft} setDraft={setDraft} clearDraft={clearDraft} toast={toast} />
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <SectionTitle icon={Shield} eyebrow="Bước 3" right={tbBusy ? <span className="text-[11px] text-slate-500">Đang lưu…</span> : null}>Luật xếp hạng</SectionTitle>
           <div className="flex flex-col gap-3 p-4">
             <p className="text-sm text-slate-400">Đổi thứ tự ưu tiên khi các đội bằng điểm. Bảng xếp hạng của khán giả và TV cập nhật ngay.</p>
-            <TieBreakerList order={vm.rules.tieBreakers} setOrder={(o) => void saveTieBreakers(o)} />
+            <TieBreakerList order={vm.rules.tieBreakers} setOrder={(o) => void saveTieBreakers(o)} disabled={vm.locked} />
           </div>
         </Card>
         <Card>
@@ -732,7 +771,7 @@ export default function AdminDashboard({
         action={
           hasKnockout ? (
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#A3E635]"><CheckCircle2 className="h-3.5 w-3.5" /> Đã tạo lịch</span>
-          ) : (
+          ) : vm.locked ? null : (
             <button
               type="button"
               disabled={koBusy || !groupDone}
@@ -746,7 +785,10 @@ export default function AdminDashboard({
         }
       />
 
-      <RosterManager vm={vm} toast={toast} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <LifecyclePanel vm={vm} auth={auth} toast={toast} />
+        <ParticipantsPanel vm={vm} toast={toast} />
+      </div>
     </div>
   );
 }

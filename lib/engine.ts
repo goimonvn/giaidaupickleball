@@ -3,7 +3,7 @@
    the realtime store and the seed script.
    ===================================================================== */
 import type {
-  EventVM, GroupConfig, KnockoutSeed, MatchActionType, MatchRow, MatchType, MatchVM, PlayerRow,
+  EventVM, GroupConfig, KnockoutSeed, MatchActionType, MatchRow, MatchType, MatchVM, PlayerRow, PodiumEntry, PodiumVM,
   RulesConfig, ServerState, StandingRow, TeamVM, TieBreaker, TournamentVM,
 } from './types';
 
@@ -42,15 +42,15 @@ export const stageName = (qualifiers: number) =>
   qualifiers <= 2 ? 'Chung kết' : qualifiers <= 4 ? 'Bán kết' : qualifiers <= 8 ? 'Tứ kết' : 'Vòng loại trực tiếp';
 export const stageType = (qualifiers: number): MatchType =>
   qualifiers <= 2 ? 'final' : qualifiers <= 4 ? 'semifinal' : 'quarterfinal';
-export const MATCH_TYPE_SHORT: Record<MatchType, string> = { group: '', quarterfinal: 'TK', semifinal: 'BK', final: 'CK' };
-export const MATCH_TYPE_LABEL: Record<MatchType, string> = { group: 'Vòng bảng', quarterfinal: 'Tứ kết', semifinal: 'Bán kết', final: 'Chung kết' };
+export const MATCH_TYPE_SHORT: Record<MatchType, string> = { group: '', quarterfinal: 'TK', semifinal: 'BK', final: 'CK', bronze: 'H3' };
+export const MATCH_TYPE_LABEL: Record<MatchType, string> = { group: 'Vòng bảng', quarterfinal: 'Tứ kết', semifinal: 'Bán kết', final: 'Chung kết', bronze: 'Tranh hạng 3' };
 
 export const qualifiersOf = (cfg: GroupConfig) => (cfg.groupsEnabled ? cfg.numGroups * cfg.advance : cfg.advance);
 
 /* ---------------------------- teams ---------------------------- */
 export const teamAvg = (team: Pick<TeamVM, 'pids'>, players: PlayerRow[]) => {
   const ps = team.pids.map((id) => players.find((p) => p.id === id)).filter(Boolean) as PlayerRow[];
-  return ps.length ? ps.reduce((s, p) => s + Number(p.rating), 0) / ps.length : 0;
+  return ps.length ? ps.reduce((s, p) => s + Number(p.skill_rating), 0) / ps.length : 0;
 };
 
 export const teamName = (team: Pick<TeamVM, 'pids'> | undefined | null, players: PlayerRow[], short = false) => {
@@ -59,7 +59,7 @@ export const teamName = (team: Pick<TeamVM, 'pids'> | undefined | null, players:
     .map((pid) => {
       const p = players.find((x) => x.id === pid);
       if (!p) return '?';
-      return short ? p.name.split(' ').slice(-1)[0] : p.name;
+      return short ? p.full_name.split(' ').slice(-1)[0] : p.full_name;
     })
     .join(' / ');
 };
@@ -97,14 +97,14 @@ export function roundRobin(ids: string[]) {
 export function generatePairs(players: PlayerRow[], method: 'skill' | 'club' | 'manual', singles: boolean): PlayerRow[][] {
   if (singles) return players.map((p) => [p]);
   if (method === 'skill') {
-    const s = [...players].sort((a, b) => b.rating - a.rating);
+    const s = [...players].sort((a, b) => b.skill_rating - a.skill_rating);
     return Array.from({ length: Math.floor(s.length / 2) }, (_, i) => [s[i], s[s.length - 1 - i]]);
   }
   if (method === 'club') {
     const tags = Array.from(new Set(players.map((p) => p.group_tag))).sort();
     if (tags.length < 2) return [];
-    const A = players.filter((p) => p.group_tag === tags[0]).sort((a, b) => b.rating - a.rating);
-    const B = players.filter((p) => p.group_tag === tags[1]).sort((a, b) => a.rating - b.rating);
+    const A = players.filter((p) => p.group_tag === tags[0]).sort((a, b) => b.skill_rating - a.skill_rating);
+    const B = players.filter((p) => p.group_tag === tags[1]).sort((a, b) => a.skill_rating - b.skill_rating);
     return Array.from({ length: Math.min(A.length, B.length) }, (_, i) => [A[i], B[i]]);
   }
   return [];
@@ -174,6 +174,7 @@ export function buildViewModel(input: {
   teams: { id: string; group_id: string; player_1_id: string; player_2_id: string | null; team_name: string; seed: number | null }[];
   matches: MatchRow[];
   players: PlayerRow[];
+  participantIds?: string[];
 }): TournamentVM {
   const rules = withDefaults<RulesConfig>(DEFAULT_RULES, input.tournament.rules_config);
   const events: EventVM[] = [...input.events]
@@ -243,7 +244,11 @@ export function buildViewModel(input: {
     matchId: matches.find((m) => m.status === 'live' && m.court === name)?.id ?? null,
   }));
 
-  return { tournament: input.tournament, rules, events, teams, matches, players: input.players, courts };
+  return {
+    tournament: input.tournament, rules, events, teams, matches, players: input.players, courts,
+    participantIds: input.participantIds ?? [],
+    locked: input.tournament.status === 'completed',
+  };
 }
 
 export const groupsOfEvent = (ev: EventVM | undefined): (string | null)[] => {
@@ -347,6 +352,17 @@ export function applyActionLocal(row: MatchRow, action: MatchActionType): MatchR
 
 export const RPC_ERRORS: Record<string, string> = {
   FORBIDDEN: 'Bạn chưa có quyền thực hiện thao tác này.',
+  TOURNAMENT_LOCKED: 'Giải đấu đã kết thúc. Không thể thay đổi kết quả.',
+  ADMIN_ONLY: 'Chỉ Admin mới mở lại được giải đã kết thúc.',
+  LAST_ADMIN: 'Phải còn ít nhất một Admin. Hãy thêm Admin khác trước.',
+  ADMIN_EXISTS: 'Hệ thống đã có Admin.',
+  NOT_SIGNED_IN: 'Bạn cần đăng nhập Google trước.',
+  FINALS_EXIST: 'Trận Chung kết và Tranh hạng 3 đã được tạo.',
+  NEED_TWO_SEMIFINALS: 'Cần đúng 2 trận Bán kết để tạo Chung kết.',
+  SEMIFINALS_NOT_DONE: 'Hai trận Bán kết chưa có kết quả.',
+  user_roles_email_key: 'Gmail này đã có trong danh sách.',
+  user_roles_email_check: 'Địa chỉ email không hợp lệ.',
+  player_contacts_phone_check: 'Số điện thoại không hợp lệ.',
   GAME_OVER: 'Game đã kết thúc theo luật. Hãy bấm "Kết thúc trận đấu".',
   MATCH_NOT_LIVE: 'Trận này không còn đang diễn ra.',
   TIE_NOT_ALLOWED: 'Tỉ số không được hoà. Pickleball luôn có đội thắng.',
@@ -363,3 +379,77 @@ export const friendlyError = (e: unknown) => {
   if (msg.includes('violates foreign key') && msg.includes('players')) return 'VĐV đang có trong đội thi đấu nên chưa xoá được.';
   return msg || 'Có lỗi xảy ra, vui lòng thử lại.';
 };
+
+/* ---------------------------- knockout & podium ---------------------------- */
+const winnerOf = (m: MatchVM) => (m.sa > m.sb ? m.a : m.b);
+const loserOf = (m: MatchVM) => (m.sa > m.sb ? m.b : m.a);
+
+export interface BracketVM {
+  semis: MatchVM[];
+  final: MatchVM | undefined;
+  bronze: MatchVM | undefined;
+  /** Projected pairings from standings while semis are not created yet */
+  projected: KnockoutSeed[][];
+  canCreateFinals: boolean;
+}
+
+export function bracketFor(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): BracketVM {
+  const ko = vm.matches.filter((m) => m.eventId === ev.id && m.type !== 'group');
+  const semis = ko.filter((m) => m.type === 'semifinal').sort((a, b) => a.order - b.order);
+  const final = ko.find((m) => m.type === 'final');
+  const bronze = ko.find((m) => m.type === 'bronze');
+  return {
+    semis,
+    final,
+    bronze,
+    projected: semis.length || final ? [] : knockoutTies(vm, ev, order),
+    canCreateFinals: semis.length === 2 && semis.every((m) => m.status === 'completed') && !final && !bronze,
+  };
+}
+
+/** 1st/2nd from the final, 3rd from the bronze match (or both SF losers); falls back to standings. */
+export function podiumFor(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): PodiumVM {
+  const teamById = (id: string) => vm.teams.find((t) => t.id === id);
+  const statsOf = (teamId: string) => {
+    let w = 0, l = 0, diff = 0;
+    vm.matches.filter((m) => m.eventId === ev.id && m.status === 'completed' && (m.a === teamId || m.b === teamId)).forEach((m) => {
+      const mine = m.a === teamId ? m.sa : m.sb;
+      const theirs = m.a === teamId ? m.sb : m.sa;
+      if (mine > theirs) w++; else l++;
+      diff += mine - theirs;
+    });
+    return { w, l, diff };
+  };
+  const entry = (place: 1 | 2 | 3, id: string | undefined, source: PodiumEntry['source']): PodiumEntry[] => {
+    const team = id ? teamById(id) : undefined;
+    return team ? [{ place, team, source, stats: statsOf(team.id) }] : [];
+  };
+
+  const { final, bronze, semis } = bracketFor(vm, ev, order);
+  if (final && final.status === 'completed') {
+    let thirds: PodiumEntry[] = [];
+    if (bronze && bronze.status === 'completed') thirds = entry(3, winnerOf(bronze), 'bronze');
+    else if (!bronze && semis.length === 2 && semis.every((s) => s.status === 'completed')) {
+      thirds = semis.flatMap((s) => entry(3, loserOf(s), 'semifinal'));
+    }
+    return {
+      eventId: ev.id,
+      label: ev.label,
+      decided: true,
+      entries: [...entry(1, winnerOf(final), 'final'), ...entry(2, loserOf(final), 'final'), ...thirds],
+    };
+  }
+
+  // No knockout finished: rank by standings (round-robin tournaments)
+  const hasKnockout = vm.matches.some((m) => m.eventId === ev.id && m.type !== 'group');
+  const groupDone = vm.matches.filter((m) => m.eventId === ev.id && m.type === 'group').every((m) => m.status === 'completed');
+  const rows = computeStandings(vm, ev.id, null, order, vm.rules.pointsPerWin);
+  return {
+    eventId: ev.id,
+    label: ev.label,
+    decided: !hasKnockout && groupDone && rows.length > 0 && !ev.config.groupsEnabled,
+    entries: ev.config.groupsEnabled
+      ? []
+      : rows.slice(0, 3).map((r, i) => ({ place: (i + 1) as 1 | 2 | 3, team: r.team, source: 'standings' as const, stats: { w: r.w, l: r.l, diff: r.diff } })),
+  };
+}

@@ -1,8 +1,8 @@
 'use client';
 
-import { Activity, CheckCircle2, ChevronRight, ClipboardEdit, Clock, Lock, Minus, Play, Plus, RefreshCw, Undo2 } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronRight, ClipboardEdit, Clock, Crown, Lock, Minus, Play, Plus, RefreshCw, Undo2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { callNextMatch, finalizeMatch, matchAction } from '@/lib/actions';
+import { callNextMatch, finalizeMatch, matchAction } from '@/lib/client-actions';
 import { isGameOver, MATCH_TYPE_LABEL, MATCH_TYPE_SHORT, scoreCall, teamName } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
 import type { CourtVM, MatchActionType, TournamentVM, UIState } from '@/lib/types';
@@ -350,19 +350,33 @@ export default function ScorekeeperView({ vm, auth, ui, setUi, toast }: { vm: To
         onChange={(v) => setUi({ scoreMode: v })}
         options={[{ id: 'live' as const, label: 'Nhập từng quả', icon: Activity }, { id: 'quick' as const, label: 'Kết quả nhanh', icon: ClipboardEdit }]}
       />
+      {vm.locked && (
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-[#F59E0B]/60 bg-[#F59E0B]/10 px-4 py-3">
+          <Crown className="mt-0.5 h-5 w-5 shrink-0 text-[#F59E0B]" />
+          <div>
+            <p className="pm-display text-lg font-bold uppercase text-[#F59E0B]">Giải đấu đã kết thúc. Không thể thay đổi kết quả.</p>
+            <p className="text-xs text-amber-200/80">Mọi nút nhập điểm đã bị khoá. Liên hệ Admin nếu cần mở lại giải.</p>
+          </div>
+        </div>
+      )}
       {ui.scoreMode === 'live' ? (
         <>
           <div className="lg:hidden">
             <Segmented full size="sm" value={activeCourt ?? ''} onChange={(v) => setUi({ activeCourt: v })} options={vm.courts.map((c) => ({ id: c.name, label: c.name }))} />
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
-            {vm.courts.map((c) => (
-              <ScorePad key={`${c.name}-${c.matchId}`} court={c} vm={vm} hiddenOnMobile={c.name !== activeCourt} toast={toast} />
-            ))}
-          </div>
+          {/* A disabled fieldset locks every button and input inside when the tournament is closed */}
+          <fieldset disabled={vm.locked} className={`m-0 min-w-0 border-0 p-0 ${vm.locked ? 'pointer-events-none opacity-50 grayscale' : ''}`} aria-disabled={vm.locked}>
+            <div className="grid gap-6 lg:grid-cols-2">
+              {vm.courts.map((c) => (
+                <ScorePad key={`${c.name}-${c.matchId}`} court={c} vm={vm} hiddenOnMobile={c.name !== activeCourt} toast={toast} />
+              ))}
+            </div>
+          </fieldset>
         </>
       ) : (
-        <QuickEntry vm={vm} ui={ui} setUi={setUi} toast={toast} />
+        <fieldset disabled={vm.locked} className={`m-0 min-w-0 border-0 p-0 ${vm.locked ? 'pointer-events-none opacity-50 grayscale' : ''}`} aria-disabled={vm.locked}>
+          <QuickEntry vm={vm} ui={ui} setUi={setUi} toast={toast} />
+        </fieldset>
       )}
     </div>
   );

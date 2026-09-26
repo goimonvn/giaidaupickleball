@@ -3,10 +3,11 @@
    Regenerate with `npm run db:types` if you change the schema.
    ===================================================================== */
 
-export type AppRole = 'viewer' | 'scorekeeper' | 'organizer';
+export type AppRole = 'viewer' | 'scorekeeper' | 'organizer' | 'admin';
+export type StaffRole = Exclude<AppRole, 'viewer'>;
 export type TournamentStatus = 'draft' | 'ongoing' | 'completed';
 export type MatchStatus = 'upcoming' | 'live' | 'completed';
-export type MatchType = 'group' | 'quarterfinal' | 'semifinal' | 'final';
+export type MatchType = 'group' | 'quarterfinal' | 'semifinal' | 'final' | 'bronze';
 export type MatchFormat = 'singles' | 'doubles';
 export type TieBreaker = 'wins' | 'h2h' | 'diff' | 'pf';
 export type Side = 'A' | 'B';
@@ -74,13 +75,43 @@ export interface TournamentEventRow {
 
 export interface PlayerRow {
   id: string;
-  name: string;
-  rating: number;
+  full_name: string;
+  skill_rating: number;
   group_tag: string;
   gender: 'M' | 'F';
   avatar_url: string | null;
   created_at: string;
 }
+
+/** Member = player + private contact (phone is only readable by BTC/Admin) */
+export interface Member extends PlayerRow {
+  phone: string | null;
+}
+
+export interface MemberInput {
+  full_name: string;
+  skill_rating: number;
+  group_tag: string;
+  gender: 'M' | 'F';
+  phone?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface UserRoleRow {
+  id: string;
+  email: string;
+  role: StaffRole;
+  note: string | null;
+  created_at: string;
+}
+
+export interface TournamentPlayerRow {
+  tournament_id: string;
+  player_id: string;
+}
+
+/** Result shape of every server action (errors never throw across the network) */
+export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
 export interface TournamentGroupRow {
   id: string;
@@ -183,7 +214,10 @@ export interface TournamentVM {
   teams: TeamVM[];
   matches: MatchVM[];
   players: PlayerRow[];
+  /** Player ids registered for this tournament (empty = everyone in the member database) */
+  participantIds: string[];
   courts: CourtVM[];
+  locked: boolean;
 }
 
 export interface StandingRow {
@@ -198,6 +232,21 @@ export interface StandingRow {
   live: boolean;
 }
 
+export interface PodiumEntry {
+  place: 1 | 2 | 3;
+  team: TeamVM;
+  /** How the place was decided */
+  source: 'final' | 'bronze' | 'semifinal' | 'standings';
+  stats: { w: number; l: number; diff: number };
+}
+
+export interface PodiumVM {
+  eventId: string;
+  label: string;
+  entries: PodiumEntry[];
+  decided: boolean;
+}
+
 export interface KnockoutSeed {
   label: string;
   team: TeamVM | undefined;
@@ -205,6 +254,8 @@ export interface KnockoutSeed {
 
 /** UI state lifted to the page so tabs / filters survive mode switches */
 export interface UIState {
+  publicTab: PublicTab;
+  tvView: 'live' | 'podium';
   viewerEvent: string | null;
   viewerGroup: string;
   viewerMatchTab: 'live' | 'upcoming' | 'completed';
@@ -218,3 +269,4 @@ export interface UIState {
 }
 
 export type AppMode = 'viewer' | 'admin' | 'score' | 'tv';
+export type PublicTab = 'live' | 'standings' | 'bracket' | 'schedule' | 'podium';
