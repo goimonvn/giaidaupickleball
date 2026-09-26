@@ -1,15 +1,16 @@
 'use client';
 
 /* Shared UI primitives — identical styling to the approved prototype. */
-import { AlertTriangle, ChevronRight, Shield } from 'lucide-react';
-import type { ComponentType, ReactNode } from 'react';
+import { AlertTriangle, ChevronRight, Shield, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { TB_SHORT } from '@/lib/engine';
 import type { TieBreaker } from '@/lib/types';
 
 export const LIME = '#A3E635';
 export const CYAN = '#06B6D4';
 
-type IconType = ComponentType<{ className?: string; strokeWidth?: number }>;
+/** Any lucide-react icon component */
+type IconType = LucideIcon;
 
 export function LiveBadge({ size = 'sm' }: { size?: 'sm' | 'lg' }) {
   const big = size === 'lg';
