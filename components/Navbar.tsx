@@ -1,31 +1,245 @@
 'use client';
 
-import { LogIn, LogOut, Pause, Play, Settings, Smartphone, Trophy, Tv, UserCog, Users, Zap } from 'lucide-react';
+import {
+  Activity, BarChart3, Check, ChevronDown, ChevronRight, LogIn, LogOut, Pause, Play, Smartphone, Trophy, Tv, User,
+  UserCog, Users, Wrench, Zap, type LucideIcon,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useClickOutside } from '@/hooks/useClickOutside';
 import { useScrollDirection } from '@/hooks/useScrollDirection';
-import { fmtClock } from '@/lib/engine';
+import { fmtDateVN, STATUS_TAG, statusTagOf } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
-import type { AppMode } from '@/lib/types';
+import type { AppScreen, PublicTab, TournamentRow } from '@/lib/types';
+import { Segmented, T2, T3, T4 } from './kit';
 
-export const MODES: { id: AppMode; label: string; short: string; icon: typeof Trophy }[] = [
-  { id: 'viewer', label: 'Xem giải đấu', short: 'Xem giải', icon: Trophy },
-  { id: 'admin', label: 'Ban tổ chức', short: 'BTC', icon: Settings },
-  { id: 'score', label: 'Nhập điểm', short: 'Nhập điểm', icon: Smartphone },
-  { id: 'tv', label: 'TV Broadcast', short: 'TV', icon: Tv },
+/* =====================================================================
+   Header + navigation (approved v4 demo)
+   · Header: tournament selector · 📺 TV (/tv/[id]) · avatar menu
+   · Staff: Facebook-style bottom nav (icon + label, 52px), no TV / Giải đấu tabs
+   · Guests: no bottom nav — 3 segmented tabs under the header instead
+   · Header and bottom nav hide on scroll down, show on scroll up (15px threshold)
+   ===================================================================== */
+
+interface NavItem<T extends AppScreen = AppScreen> {
+  id: T;
+  label: string;
+  /** Label on narrow phones */
+  short?: string;
+  icon: LucideIcon;
+}
+
+export const PUBLIC_TABS: NavItem<PublicTab>[] = [
+  { id: 'matches', label: 'Trận Đấu', icon: Activity },
+  { id: 'table', label: 'Xếp Hạng & Nhánh', short: 'Xếp Hạng', icon: BarChart3 },
+  { id: 'podium', label: 'Vinh Danh', icon: Trophy },
 ];
+const BTC_TAB: NavItem = { id: 'btc', label: 'BTC', icon: Wrench };
+const REFEREE_TAB: NavItem = { id: 'referee', label: 'Trọng Tài', icon: Smartphone };
 
-const ROLE_LABEL = { viewer: 'Khán giả', scorekeeper: 'Trọng tài', organizer: 'BTC', admin: 'Admin' } as const;
+/** Bottom-nav tabs for a role. Guests get none (they use the top tabs). */
+export function navItemsFor(auth: Pick<AuthState, 'isStaff' | 'isOrganizer'>): NavItem[] {
+  if (!auth.isStaff) return [];
+  return [...PUBLIC_TABS, ...(auth.isOrganizer ? [BTC_TAB] : []), REFEREE_TAB];
+}
 
-function useNow() {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
+const ROLE_TAG = { viewer: 'KHÁCH', scorekeeper: 'TRỌNG TÀI', organizer: 'BTC', admin: 'ADMIN' } as const;
+
+/* ---------------------------- tournament selector ---------------------------- */
+function TournamentSelector({
+  tournaments, current, onSelect, liveCount, connected, onManage,
+}: {
+  tournaments: TournamentRow[];
+  current: TournamentRow | null;
+  onSelect: (id: string) => void;
+  liveCount: number;
+  connected: boolean;
+  onManage?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(ref, open, close);
+  const tag = current ? STATUS_TAG[statusTagOf(current)] : null;
+
+  return (
+    <div ref={ref} className="relative min-w-0 flex-1">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        disabled={!tournaments.length}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-lg py-1 text-left"
+      >
+        <span className="min-w-0 flex-1">
+          <span className={`${T2} block truncate text-white`}>{current?.title ?? 'PickleMasters Live'}</span>
+          <span className={`${T4} flex items-center gap-1.5 text-slate-500`}>
+            {tag && <span className={`rounded px-1 ${tag.cls}`}>{tag.label}</span>}
+            {!connected ? <span>Đang kết nối…</span> : liveCount > 0 && <span className="text-[#84CC16]">● {liveCount} sân live</span>}
+          </span>
+        </span>
+        {tournaments.length > 1 && <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition ${open ? 'rotate-180' : ''}`} />}
+      </button>
+
+      {open && (
+        <div role="listbox" aria-label="Chọn giải đấu" className="pm-sheet absolute left-0 top-12 z-50 max-h-[60vh] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-1.5 shadow-2xl">
+          {tournaments.map((t) => {
+            const on = t.id === current?.id;
+            const st = STATUS_TAG[statusTagOf(t)];
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="option"
+                aria-selected={on}
+                onClick={() => { setOpen(false); onSelect(t.id); }}
+                className={`flex min-h-[48px] w-full items-center gap-2.5 rounded-xl px-3 py-1.5 text-left ${on ? 'bg-white/[0.07]' : 'hover:bg-white/5'}`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className={`${T3} block truncate text-white`}>{t.title}</span>
+                  <span className={`${T4} flex items-center gap-1.5 text-slate-500`}>
+                    <span className={`rounded px-1 ${st.cls}`}>{st.label}</span>{fmtDateVN(t.starts_at)}
+                  </span>
+                </span>
+                {on && <Check className="h-4 w-4 shrink-0 text-slate-300" />}
+              </button>
+            );
+          })}
+          {onManage && (
+            <>
+              <div className="my-1 h-px bg-white/5" />
+              <button type="button" onClick={() => { setOpen(false); onManage(); }} className={`flex min-h-[44px] w-full items-center gap-2.5 rounded-xl px-3 ${T3} text-slate-300 hover:bg-white/5`}>
+                <Trophy className="h-4 w-4" /> <span className="flex-1 text-left">Quản lý giải đấu</span> <ChevronRight className="h-4 w-4 text-slate-500" />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- avatar menu ---------------------------- */
+function AvatarMenu({
+  auth, onOpenProfile, onOpenTournaments, onOpenChange, demo, setDemo,
+}: {
+  auth: AuthState;
+  onOpenProfile: () => void;
+  onOpenTournaments: () => void;
+  onOpenChange: (open: boolean) => void;
+  demo?: boolean;
+  setDemo?: (v: boolean) => void;
+}) {
+  const [open, setOpenState] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const setOpen = useCallback((v: boolean) => { setOpenState(v); onOpenChange(v); }, [onOpenChange]);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  useClickOutside(ref, open, close);
+  // If the menu unmounts while open (e.g. signed out elsewhere), re-enable header auto-hide
+  useEffect(() => () => onOpenChange(false), [onOpenChange]);
+
+  const name = auth.profile?.full_name || auth.email || 'Tài khoản';
+  const demoAllowed = process.env.NEXT_PUBLIC_ENABLE_DEMO === 'true' && auth.isStaff && setDemo;
+  const itemCls = `flex min-h-[44px] w-full items-center gap-2.5 rounded-xl px-3 text-left ${T3}`;
+  const pick = (fn: () => void) => () => { setOpen(false); fn(); };
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Menu tài khoản"
+        onClick={() => setOpen(!open)}
+        className="flex h-9 items-center gap-2 rounded-full border border-white/10 py-0.5 pl-0.5 pr-2.5 hover:bg-white/5"
+      >
+        {auth.profile?.avatar_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={auth.profile.avatar_url} alt="" referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover" />
+        ) : (
+          <span className={`flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 ${T2} text-slate-950`}>{name.slice(0, 1).toUpperCase()}</span>
+        )}
+        <span className={`${T4} hidden text-slate-300 min-[380px]:inline`}>{ROLE_TAG[auth.role]}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-slate-500 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div role="menu" className="pm-sheet absolute right-0 top-11 z-50 w-64 overflow-hidden rounded-2xl border border-white/10 bg-slate-900 p-1.5 shadow-2xl">
+          <div className="px-3 py-2">
+            <p className={`${T2} truncate text-white`}>{name}</p>
+            <p className={`${T4} truncate text-slate-500`}>{auth.email}</p>
+          </div>
+          {!auth.isStaff && (
+            <p className={`mx-2 mb-1 rounded-lg bg-slate-950 p-2 ${T4} text-slate-400`}>Gmail này chưa được cấp quyền BTC / Trọng tài. Hãy nhờ Admin thêm bạn.</p>
+          )}
+          <button type="button" role="menuitem" onClick={pick(onOpenProfile)} className={`${itemCls} text-slate-300 hover:bg-white/5`}>
+            <User className="h-4 w-4" /> {auth.isAdmin ? 'Hồ sơ Admin' : 'Hồ sơ'}
+          </button>
+          {auth.isOrganizer && (
+            <button type="button" role="menuitem" onClick={pick(onOpenTournaments)} className={`${itemCls} bg-white/[0.07] text-white`}>
+              <Trophy className="h-4 w-4" /> <span className="flex-1">Quản lý giải đấu</span> <ChevronRight className="h-4 w-4 text-slate-500" />
+            </button>
+          )}
+          {auth.isOrganizer && (
+            <Link href="/members" role="menuitem" onClick={() => setOpen(false)} className={`${itemCls} text-slate-300 hover:bg-white/5`}>
+              <Users className="h-4 w-4" /> Quản lý Thành viên
+            </Link>
+          )}
+          {auth.isAdmin && (
+            <Link href="/admin" role="menuitem" onClick={() => setOpen(false)} className={`${itemCls} text-slate-300 hover:bg-white/5`}>
+              <UserCog className="h-4 w-4" /> Phân quyền Gmail
+            </Link>
+          )}
+          {demoAllowed && (
+            <button type="button" role="menuitem" onClick={pick(() => setDemo!(!demo))} className={`${itemCls} text-slate-300 hover:bg-white/5`}>
+              {demo ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />} {demo ? 'Tắt Demo tự bấm điểm' : 'Bật Demo tự bấm điểm'}
+            </button>
+          )}
+          <div className="my-1 h-px bg-white/5" />
+          <button type="button" role="menuitem" onClick={pick(() => void auth.signOut())} className={`${itemCls} text-rose-300 hover:bg-rose-500/10`}>
+            <LogOut className="h-4 w-4" /> Đăng xuất
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- bottom nav ---------------------------- */
+function BottomNav({ items, active, hidden, onGo }: { items: NavItem[]; active: AppScreen; hidden: boolean; onGo: (s: AppScreen) => void }) {
+  return (
+    <nav
+      aria-label="Điều hướng chính"
+      className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/5 bg-slate-950/95 backdrop-blur transition-transform duration-300 will-change-transform ${hidden ? 'translate-y-full' : 'translate-y-0'}`}
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
+      <div className="mx-auto grid h-[52px] max-w-3xl" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+        {items.map((n) => {
+          const on = active === n.id;
+          const Icon = n.icon;
+          return (
+            <button
+              key={n.id}
+              type="button"
+              onClick={() => onGo(n.id)}
+              aria-current={on ? 'page' : undefined}
+              className="group relative flex flex-col items-center justify-center gap-0.5 px-1"
+            >
+              <span className={`flex h-7 w-12 items-center justify-center rounded-full transition duration-200 ${on ? 'bg-[#84CC16]/15 shadow-[0_0_16px_rgba(132,204,22,.35)]' : 'group-hover:bg-white/5'}`}>
+                <Icon className={`h-5 w-5 transition duration-200 ${on ? 'scale-110 text-[#84CC16]' : 'text-slate-400 group-hover:text-slate-200'}`} strokeWidth={on ? 2.4 : 2} aria-hidden="true" />
+              </span>
+              <span className={`${T4} max-w-full truncate ${on ? 'text-white' : 'text-slate-400'}`}>
+                <span className="sm:hidden">{n.short ?? n.label}</span>
+                <span className="hidden sm:inline">{n.label}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
 }
 
 function GoogleG() {
@@ -39,168 +253,107 @@ function GoogleG() {
   );
 }
 
-/**
- * Top header + mobile bottom tab bar, both auto-hiding on scroll (Facebook style).
- * Guests (not signed in, or signed in without a staff role) get the header only:
- * a single public page, no tab bar, and a subtle "Đăng nhập" button.
- */
+/* ---------------------------- Navbar ---------------------------- */
 export default function Navbar({
-  mode, setMode, liveCount, auth, demo, setDemo, connected,
+  auth, tournaments = [], current = null, onSelectTournament, screen, onNavigate, onOpenProfile,
+  liveCount = 0, connected = true, demo, setDemo,
 }: {
-  mode?: AppMode;
-  setMode?: (m: AppMode) => void;
-  liveCount: number;
   auth: AuthState;
+  tournaments?: TournamentRow[];
+  current?: TournamentRow | null;
+  onSelectTournament?: (id: string) => void;
+  /** Active screen (main page). Omit on /admin and /members. */
+  screen?: AppScreen;
+  /** Navigate inside the main page. Omitted → links to /?screen=… */
+  onNavigate?: (s: AppScreen) => void;
+  onOpenProfile?: () => void;
+  liveCount?: number;
+  connected?: boolean;
   demo?: boolean;
   setDemo?: (v: boolean) => void;
-  connected: boolean;
 }) {
-  const now = useNow();
   const router = useRouter();
-  const [menu, setMenu] = useState(false);
-  const hidden = useScrollDirection({ disabled: menu });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hidden = useScrollDirection({ threshold: 15, disabled: menuOpen });
   const staff = auth.isStaff;
-  const demoAllowed = process.env.NEXT_PUBLIC_ENABLE_DEMO === 'true' && staff && setDemo;
+  const items = navItemsFor(auth);
 
-  const go = (m: AppMode) => {
-    setMenu(false);
-    if (setMode) setMode(m);
-    else router.push(m === 'viewer' ? '/' : `/?mode=${m}`);
+  const go = (s: AppScreen) => {
+    if (onNavigate) onNavigate(s);
+    else router.push(s === 'matches' ? '/' : `/?screen=${s}`);
   };
+  const openProfile = onOpenProfile ?? (() => router.push('/?screen=matches&profile=1'));
+  const guestTab: PublicTab = screen === 'table' || screen === 'podium' ? screen : 'matches';
 
   return (
     <>
       <header
-        className={`sticky z-40 border-b border-[#374151]/70 bg-[#0B0F17]/90 backdrop-blur transition-transform duration-300 will-change-transform ${hidden ? '-translate-y-full' : 'translate-y-0'}`}
+        className={`sticky z-40 border-b border-white/5 bg-slate-950/90 backdrop-blur transition-transform duration-300 will-change-transform ${hidden ? '-translate-y-full' : 'translate-y-0'}`}
         style={{ top: 'env(safe-area-inset-top, 0px)' }}
       >
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-2.5">
-          <Link href="/" className="flex min-w-0 items-center gap-2.5" onClick={() => setMode?.('viewer')}>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#A3E635] shadow-[0_0_24px_rgba(163,230,53,.35)]">
-              <Zap className="h-5 w-5 text-[#0B0F17]" strokeWidth={3} />
-            </span>
-            <span className="min-w-0 leading-none">
-              <span className="block truncate pm-display text-lg font-extrabold uppercase italic text-white sm:text-xl">PickleMasters <span className="text-[#A3E635]">Live</span></span>
-              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-red-500 pm-pulse' : 'bg-slate-600'}`} />
-                {connected ? `${liveCount} sân live` : 'Đang kết nối…'} · <span className="pm-num">{now ? fmtClock(now) : '--:--:--'}</span>
-              </span>
-            </span>
+        <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
+          <Link href="/" onClick={onNavigate ? () => onNavigate('matches') : undefined} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
+            <Zap className="h-4 w-4 text-white" aria-hidden="true" />
+            <span className="sr-only">PickleMasters Live</span>
           </Link>
 
-          {staff && (
-            <nav className="ml-auto hidden md:block" aria-label="Chế độ">
-              <div className="flex gap-1 rounded-xl border border-[#374151] bg-[#111827] p-1">
-                {MODES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => go(m.id)}
-                    aria-current={mode === m.id ? 'page' : undefined}
-                    className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-lg px-3 pm-display text-sm font-bold uppercase transition ${mode === m.id ? 'bg-[#A3E635] text-[#0B0F17]' : 'text-slate-400 hover:bg-[#1F2937] hover:text-white'}`}
-                  >
-                    <m.icon className="h-4 w-4" /> {m.label}
-                  </button>
-                ))}
-              </div>
-            </nav>
+          {onSelectTournament ? (
+            <TournamentSelector
+              tournaments={tournaments}
+              current={current}
+              onSelect={onSelectTournament}
+              liveCount={liveCount}
+              connected={connected}
+              onManage={auth.isOrganizer ? () => go('tournaments') : undefined}
+            />
+          ) : (
+            <span className={`${T2} min-w-0 flex-1 truncate text-white`}>PickleMasters Live</span>
           )}
 
-          <div className={`ml-auto flex shrink-0 items-center gap-2 ${staff ? 'md:ml-0' : ''}`}>
-            {demoAllowed && (
-              <button
-                type="button"
-                onClick={() => setDemo!(!demo)}
-                className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold ${demo ? 'border-[#A3E635] text-[#A3E635]' : 'border-[#374151] text-slate-400'}`}
-                title="Tự động cộng điểm để xem cập nhật realtime"
-              >
-                {demo ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} Demo
-              </button>
-            )}
+          {current && (
+            <a
+              href={`/tv/${current.id}${current.status === 'completed' ? '?view=podium' : ''}`}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Mở chế độ TV trong tab mới"
+              title="Chế độ TV (màn hình 16:9)"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:bg-white/5"
+            >
+              <Tv className="h-4 w-4" />
+            </a>
+          )}
 
-            {auth.session ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setMenu(!menu)}
-                  className="flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] bg-[#111827] py-1 pl-1 pr-2.5"
-                  aria-haspopup="menu"
-                  aria-expanded={menu}
-                >
-                  {auth.profile?.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={auth.profile.avatar_url} alt="" className="h-8 w-8 rounded-md object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#1F2937] pm-display text-sm font-bold text-[#A3E635]">
-                      {(auth.profile?.full_name || auth.email || 'U').slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                  <span className={`rounded px-1.5 py-0.5 pm-display text-[10px] font-bold uppercase ${auth.isAdmin ? 'bg-[#F59E0B] text-[#0B0F17]' : auth.isOrganizer ? 'bg-[#A3E635] text-[#0B0F17]' : staff ? 'bg-[#06B6D4] text-[#0B0F17]' : 'bg-[#1F2937] text-slate-400'}`}>
-                    {ROLE_LABEL[auth.role]}
-                  </span>
-                </button>
-                {menu && (
-                  <div role="menu" className="absolute right-0 top-12 z-50 w-60 rounded-xl border border-[#374151] bg-[#111827] p-2 shadow-2xl">
-                    <p className="truncate px-2 py-1.5 text-sm font-semibold text-white">{auth.profile?.full_name ?? auth.email}</p>
-                    <p className="truncate px-2 pb-2 text-xs text-slate-500">{auth.email}</p>
-                    {!staff && <p className="mx-2 mb-2 rounded-lg bg-[#0B0F17] p-2 text-xs text-slate-400">Gmail này chưa được cấp quyền BTC / Trọng tài. Hãy nhờ Admin thêm bạn.</p>}
-                    {auth.isOrganizer && (
-                      <Link href="/members" role="menuitem" onClick={() => setMenu(false)} className="flex min-h-[40px] items-center gap-2 rounded-lg px-2 text-sm text-slate-200 hover:bg-[#1F2937]">
-                        <Users className="h-4 w-4 text-[#06B6D4]" /> Quản lý thành viên
-                      </Link>
-                    )}
-                    {auth.isAdmin && (
-                      <Link href="/admin" role="menuitem" onClick={() => setMenu(false)} className="flex min-h-[40px] items-center gap-2 rounded-lg px-2 text-sm text-slate-200 hover:bg-[#1F2937]">
-                        <UserCog className="h-4 w-4 text-[#F59E0B]" /> Phân quyền (Admin)
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => { setMenu(false); void auth.signOut(); }}
-                      className="flex min-h-[40px] w-full items-center gap-2 rounded-lg px-2 text-sm text-slate-300 hover:bg-[#1F2937]"
-                    >
-                      <LogOut className="h-4 w-4" /> Đăng xuất
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void auth.signInWithGoogle()}
-                disabled={auth.loading}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[#374151] px-3 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
-                title="Dành cho Ban tổ chức / Trọng tài"
-              >
-                <GoogleG /> <span className="hidden sm:inline">Đăng nhập</span><LogIn className="h-4 w-4 sm:hidden" />
-              </button>
-            )}
-          </div>
+          {auth.session ? (
+            <AvatarMenu
+              auth={auth}
+              onOpenProfile={openProfile}
+              onOpenTournaments={() => go('tournaments')}
+              onOpenChange={setMenuOpen}
+              demo={demo}
+              setDemo={setDemo}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => void auth.signInWithGoogle()}
+              disabled={auth.loading}
+              title="Dành cho Ban tổ chức / Trọng tài"
+              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/10 px-3 ${T3} text-slate-300 hover:bg-white/5 disabled:opacity-50`}
+            >
+              <GoogleG /> <span className="hidden sm:inline">Đăng nhập</span><LogIn className="h-4 w-4 sm:hidden" />
+            </button>
+          )}
         </div>
+
+        {/* Guests: no bottom nav — 3 segmented tabs live in the (auto-hiding) header */}
+        {!staff && !auth.loading && screen && (
+          <div className="mx-auto max-w-3xl px-4 pb-2">
+            <Segmented full label="Mục xem" value={guestTab} onChange={(v) => go(v)} options={PUBLIC_TABS.map((t) => ({ id: t.id, label: t.short ?? t.label, icon: t.icon }))} />
+          </div>
+        )}
       </header>
 
-      {/* Mobile bottom tab bar — staff only, auto-hides on scroll */}
-      {staff && (
-        <nav
-          className={`fixed inset-x-0 bottom-0 z-40 border-t border-[#374151] bg-[#0B0F17]/95 backdrop-blur transition-transform duration-300 will-change-transform md:hidden ${hidden ? 'translate-y-full' : 'translate-y-0'}`}
-          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-          aria-label="Chế độ"
-        >
-          <div className="grid grid-cols-4">
-            {MODES.map((m) => {
-              const on = mode === m.id;
-              return (
-                <button key={m.id} type="button" onClick={() => go(m.id)} aria-current={on ? 'page' : undefined} className="relative flex min-h-[62px] flex-col items-center justify-center gap-1">
-                  {on && <span className="absolute top-0 h-[3px] w-10 rounded-b-full bg-[#A3E635]" />}
-                  <m.icon className={`h-5 w-5 ${on ? 'text-[#A3E635]' : 'text-slate-500'}`} />
-                  <span className={`pm-display text-[12px] font-bold uppercase ${on ? 'text-white' : 'text-slate-500'}`}>{m.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-      )}
+      {staff && screen && items.length > 0 && <BottomNav items={items} active={screen} hidden={hidden} onGo={go} />}
     </>
   );
 }

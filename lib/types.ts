@@ -14,11 +14,17 @@ export type Side = 'A' | 'B';
 export type MatchActionType = 'point_a' | 'point_b' | 'toggle_server' | 'side_out' | 'undo';
 
 export interface RulesConfig {
+  /** Điểm thắng game: 11 / 15 / 21 */
   target: number;
+  /** Cách biệt tối thiểu: 1 hoặc 2 (win by 2) */
   winBy: number;
   pointsPerWin: number;
+  /** Ưu tiên khi bằng điểm, theo thứ tự */
   tieBreakers: TieBreaker[];
+  /** Tên sân đang dùng ('Sân 1' … 'Sân 4'); số sân = courts.length */
   courts: string[];
+  /** Trọng tài theo sân (tên hiển thị công khai, không lưu email). DB tự gán cho trận khi lên sân. */
+  referees?: Record<string, string>;
 }
 
 export interface GroupConfig {
@@ -150,6 +156,8 @@ export interface MatchRow {
   scheduled_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /** Trọng tài của trận (copy từ rules_config.referees khi trận lên sân) */
+  referee: string | null;
   updated_by: string | null;
   created_at: string;
   updated_at: string;
@@ -200,6 +208,9 @@ export interface MatchVM {
   server: 1 | 2;
   historyLength: number;
   updatedAt: string;
+  referee: string | null;
+  /** Hiệp đang đấu. Hiện mỗi trận là 1 game nên luôn = 1 (để sẵn cho thể thức best-of-3). */
+  game: number;
 }
 
 export interface CourtVM {
@@ -252,13 +263,67 @@ export interface KnockoutSeed {
   team: TeamVM | undefined;
 }
 
-/** UI state lifted to the page so tabs / filters survive mode switches */
+/* =====================================================================
+   UI (PickleMasters Live v1.2 — theo bản demo v4 đã duyệt)
+   ===================================================================== */
+
+/** Tab công khai: khách thấy dạng tab trên cùng, nhân sự thấy ở thanh điều hướng đáy */
+export type PublicTab = 'matches' | 'table' | 'podium';
+/** Màn hình chỉ dành cho nhân sự (BTC có cả 2, Trọng tài chỉ có 'referee') */
+export type StaffScreen = 'btc' | 'referee';
+/** Mọi màn hình của trang chính. 'tournaments' mở từ menu avatar (Quản lý giải đấu). TV là trang riêng /tv/[id]. */
+export type AppScreen = PublicTab | StaffScreen | 'tournaments';
+
+export type TournamentStatusTag = 'upcoming' | 'ongoing' | 'completed';
+
+/** 2.2 Ghép cặp */
+export type PairingMode = 'balanced' | 'ab' | 'manual';
+/** 2.3 Chia bảng */
+export type GroupingMode = 'auto' | 'manual';
+export type BtcSubStep = '2.1' | '2.2' | '2.3';
+
+/** Bản nháp Bước 2 của một nội dung — giữ ở trang để không mất khi đổi màn hình */
+export interface BtcDraft {
+  sub: BtcSubStep;
+  picked: string[];
+  pairMode: PairingMode;
+  abSeed: number;
+  /** null = chưa ghép; mỗi phần tử là danh sách player id của một đội */
+  pairs: string[][] | null;
+  groupMode: GroupingMode;
+  groupsEnabled: boolean;
+  numGroups: number;
+  advance: number;
+  /** index đội trong `pairs` → chữ cái bảng */
+  assign: Record<number, string>;
+}
+
+/** Dữ liệu form Tạo / Sửa giải (Quản lý giải đấu & Bước 1) */
+export interface TournamentInput {
+  title: string;
+  /** yyyy-mm-dd */
+  date: string;
+  venue: string;
+  courts: number;
+  target: number;
+  winBy: number;
+  tieBreakers: TieBreaker[];
+}
+
+export interface EventInput {
+  name: string;
+  short: string;
+  singles: boolean;
+  groupsEnabled: boolean;
+  numGroups: number;
+  advance: number;
+}
+
+/** UI state lifted to the page so filters / scoring mode survive screen switches */
 export interface UIState {
-  publicTab: PublicTab;
   tvView: 'live' | 'podium';
   viewerEvent: string | null;
   viewerGroup: string;
-  viewerMatchTab: 'live' | 'upcoming' | 'completed';
   adminEvent: string | null;
   scoreMode: 'live' | 'quick';
   activeCourt: string | null;
@@ -267,6 +332,3 @@ export interface UIState {
   tvCycle: boolean;
   tvIdx: number;
 }
-
-export type AppMode = 'viewer' | 'admin' | 'score' | 'tv';
-export type PublicTab = 'live' | 'standings' | 'bracket' | 'schedule' | 'podium';

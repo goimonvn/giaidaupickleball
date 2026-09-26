@@ -16,7 +16,7 @@ const MEDAL = {
 export function useConfetti() {
   return useCallback(async () => {
     const confetti = (await import('canvas-confetti')).default;
-    const colors = ['#A3E635', '#84CC16', '#F59E0B', '#06B6D4', '#FFFFFF'];
+    const colors = ['#F59E0B', '#FDE68A', '#E2E8F0', '#84CC16', '#FFFFFF'];
     const base = { disableForReducedMotion: true, colors, zIndex: 60 };
     confetti({ ...base, particleCount: 140, spread: 80, startVelocity: 48, origin: { y: 0.65 } });
     const end = Date.now() + 1600;

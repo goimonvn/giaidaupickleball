@@ -10,22 +10,25 @@ Webapp tổ chức giải Pickleball phong trào: bảng xếp hạng realtime, 
 app/
   admin/page.tsx           Phân quyền bằng Gmail (Admin): cấp / đổi / thu hồi quyền BTC, Trọng tài
   members/page.tsx         Quản lý thành viên: tìm kiếm, lọc nhóm, thêm / sửa / xoá, số điện thoại (chỉ BTC xem)
-  layout.tsx               Font Barlow / Barlow Condensed (có tiếng Việt), theme #0B0F17
-  page.tsx                 Khung app: 4 chế độ, state UI dùng chung, toast, chế độ Demo
+  layout.tsx               Font Be Vietnam Pro (chữ) + Barlow Condensed (số điểm), nền slate-950
+  page.tsx                 Khung app: màn hình Trận Đấu / Xếp Hạng & Nhánh / Vinh Danh / BTC / Trọng Tài / Quản lý giải đấu
   tv/[tournamentId]/       Trang TV không viền cho máy chiếu: /tv/<id>
   auth/callback/route.ts   Nhận code Google OAuth → cookie phiên
 components/
-  Navbar.tsx               Header + thanh tab đáy tự ẩn khi cuộn xuống (khách chỉ có header + nút Đăng nhập)
+  kit.tsx                  Bộ UI dùng chung theo bản demo v4: thang chữ 4 cấp (T1–T4), thẻ, nút, Sheet, Confirm, LiveBadge
+  Navbar.tsx               Header (chọn giải · 📺 TV · menu avatar) + thanh điều hướng đáy 52px cho nhân sự;
+                           khách không có thanh đáy mà có 3 tab ngay dưới header. Tự ẩn khi cuộn xuống (ngưỡng 15px)
+  TournamentManager.tsx    Quản lý giải đấu (menu avatar): trạng thái, Mở, Chỉnh sửa, Đóng/Khoá, Xoá
   PodiumView.tsx           Bục trao giải Vàng / Bạc / Đồng + pháo hoa canvas-confetti (bản trang và bản TV 16:9)
-  MemberPicker.tsx         Chọn VĐV từ danh sách thành viên bằng checkbox
-  PublicView.tsx           Trang khán giả: Trực tiếp · BXH · Nhánh đấu · Lịch đấu · Vinh danh, nút Chế độ TV
-  AdminDashboard.tsx       Tạo giải, ghép cặp, chia bảng (tự động rắn / thủ công), luật xếp hạng, VĐV, tạo lịch Bán kết
+  PublicView.tsx           3 tab khán giả: Trận Đấu (thẻ tỉ số kiểu FotMob + ngăn chi tiết trận),
+                           Xếp Hạng & Nhánh, Vinh Danh (bục trao giải + pháo hoa)
+  AdminDashboard.tsx       BTC dạng 3 bước: 1 Cấu hình & thể lệ · 2 VĐV, ghép cặp, chia bảng · 3 Điều hành & Knockout
   ScorekeeperView.tsx      Nhập từng quả (+1, người giao, đổi giao, hủy quả) và Kết quả nhanh
   TVBroadcastView.tsx      Màn hình 16:9: 2 sân live, BXH tự chuyển bảng, trận kế tiếp, dòng chữ chạy
-  RulesModal.tsx           Luật thi đấu (BTC sửa, người khác chỉ xem)
-  Standings.tsx, ui.tsx    Thành phần dùng chung, giữ nguyên style của prototype
+  ui.tsx                   Thành phần cũ, chỉ còn màn trao giải (PodiumView) dùng
 hooks/
-  useScrollDirection.ts    Ẩn / hiện thanh điều hướng theo hướng cuộn
+  useScrollDirection.ts    Ẩn / hiện thanh điều hướng theo hướng cuộn (ngưỡng 15px)
+  useClickOutside.ts       Đóng menu / popup khi bấm ra ngoài hoặc nhấn Esc
 lib/
   actions.ts               Server Actions: phân quyền Gmail, thành viên, tạo giải, đóng / mở giải, tạo Chung kết
   client-actions.ts        Ghi dữ liệu phía trình duyệt (bấm điểm tức thì, chia bảng, luật)
@@ -81,6 +84,13 @@ npm run dev
 
 Nếu trước đây bạn đã đặt `profiles.role = 'organizer'` bằng SQL, migration sẽ tự chuyển tài khoản đó thành **Admin**.
 
+### 5b. Bản 1.2 (giao diện mới)
+
+Chạy thêm migration `supabase/migrations/20260928000000_referee_tournament_manager.sql`. Migration này thêm:
+
+- cột `matches.referee` (tên trọng tài, công khai) và trigger tự gán trọng tài của sân khi trận lên sân;
+- hàm `delete_tournament()` cho nút **Xoá** trong Quản lý giải đấu. Giải đã kết thúc thì chỉ Admin xoá được.
+
 ### 6. Deploy Vercel
 
 Import repo vào Vercel, thêm các biến `NEXT_PUBLIC_*` như trong `.env.local`, đặt `NEXT_PUBLIC_SITE_URL` bằng domain Vercel và thêm `https://<domain>/auth/callback` vào Redirect URLs của Supabase.
@@ -102,6 +112,10 @@ Quyền được lưu trong bảng `user_roles` (Gmail → vai trò). Mọi hàm
 
 ## Vòng đời giải đấu
 
+0. Menu avatar → **Quản lý giải đấu** → **Tạo giải** (trạng thái *Sắp diễn ra*). Vào tab **BTC**:
+   Bước 1 chỉnh số sân, điểm thắng game (11/15/21), cách biệt (1 hoặc 2), thứ tự ưu tiên xếp hạng, nội dung thi đấu.
+   Bước 2: 2.1 chọn VĐV → 2.2 ghép cặp (Cân bằng theo trình / Cân bằng A-B / Thủ công) → 2.3 chia bảng → **Áp dụng & tạo lịch** (giải chuyển sang *Đang thi đấu*).
+   Bước 3: gán trọng tài cho từng sân, theo dõi các sân.
 1. Vòng bảng xong → BTC bấm **Tạo lịch Bán kết**.
 2. Hai trận Bán kết xong → bấm **Tạo trận Chung kết & Tranh Hạng Ba**. Người thắng vào Chung kết, người thua đá Tranh hạng 3.
 3. Chung kết xong → bấm **Đóng / Kết thúc Giải đấu**. Trang khán giả mở tab **Vinh danh**. Màn hình `/tv/<id>` tự chuyển sang **Màn hình Trao giải** có pháo hoa.

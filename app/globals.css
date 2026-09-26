@@ -2,14 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PickleMasters Live — prototype design system (unchanged) */
+/* PickleMasters Live v1.2 — design system from the approved v4 demo
+   Type scale: text-lg font-bold / text-sm font-semibold / text-xs font-medium / text-[10px] font-medium tracking-wide
+   Volt #84CC16 is reserved for LIVE (badge, live score, serve ball) + the active bottom-nav icon. */
 :root { color-scheme: dark; }
-html, body { background: #0B0F17; }
+html, body { background: #020617; }
 
-.pm-root { font-family: var(--font-body), 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-tap-highlight-color: transparent; }
+.pm-root { font-family: var(--font-body), 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-tap-highlight-color: transparent; }
 .pm-display { font-family: var(--font-display), 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif; letter-spacing: .02em; }
 .pm-num { font-family: var(--font-display), 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif; font-variant-numeric: tabular-nums; }
-.pm-root button:focus-visible, .pm-root select:focus-visible, .pm-root input:focus-visible, .pm-root a:focus-visible { outline: 2px solid #A3E635; outline-offset: 2px; }
+.pm-root button:focus-visible, .pm-root select:focus-visible, .pm-root input:focus-visible, .pm-root a:focus-visible { outline: 2px solid #E2E8F0; outline-offset: 2px; }
 .pm-root input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .pm-root input[type=number] { -moz-appearance: textfield; }
 
@@ -20,11 +22,13 @@ html, body { background: #0B0F17; }
 @keyframes pm-pop { 0% { transform: scale(1) } 40% { transform: scale(1.12) } 100% { transform: scale(1) } }
 .pm-pop { animation: pm-pop .35s ease-out; }
 .pm-grid-bg {
-  background-image: linear-gradient(rgba(163,230,53,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(163,230,53,.045) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
   background-size: 44px 44px;
 }
 .pm-scroll::-webkit-scrollbar { height: 6px; width: 6px }
 .pm-scroll::-webkit-scrollbar-thumb { background: #374151; border-radius: 6px }
 .pm-noscroll::-webkit-scrollbar { display: none }
 .pm-noscroll { scrollbar-width: none }
-@media (prefers-reduced-motion: reduce) { .pm-marquee, .pm-pulse, .pm-pop { animation: none !important } }
+@keyframes pm-up { from { transform: translateY(12px); opacity: 0 } to { transform: none; opacity: 1 } }
+.pm-sheet { animation: pm-up .22s ease-out; }
+@media (prefers-reduced-motion: reduce) { .pm-marquee, .pm-pulse, .pm-pop, .pm-sheet { animation: none !important } }

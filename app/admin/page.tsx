@@ -1,21 +1,27 @@
 'use client';
 
-import { ArrowLeft, Crown, Loader2, Lock, Mail, Plus, ShieldCheck, Trash2, UserCog } from 'lucide-react';
+import { ArrowLeft, Crown, Loader2, Lock, Mail, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import {
+  BTN_PRIMARY, CARD, Empty, Field, ICON_BTN, INPUT, Segmented, StripGroup, T1, T2, T3, T4,
+} from '@/components/kit';
 import Navbar from '@/components/Navbar';
 import { useToast } from '@/components/Toast';
-import { Card, EmptyState, SectionTitle, Segmented } from '@/components/ui';
 import { adminExists, claimFirstAdmin, listUserRoles, revokeUserRole, updateUserRole, upsertUserRole } from '@/lib/actions';
 import { useAuth } from '@/lib/supabase';
 import type { StaffRole, UserRoleRow } from '@/lib/types';
 
+/* =====================================================================
+   Phân quyền Gmail (Admin only) — v4 demo skin
+   ===================================================================== */
+
 const ROLE_META: Record<StaffRole, { label: string; desc: string; cls: string }> = {
-  admin: { label: 'Admin', desc: 'Toàn quyền: phân quyền, tạo & khoá giải, mở lại giải.', cls: 'bg-[#F59E0B] text-[#0B0F17]' },
-  organizer: { label: 'Ban Tổ Chức', desc: 'Tạo giải, ghép cặp, chia bảng, quản lý thành viên, đóng giải.', cls: 'bg-[#A3E635] text-[#0B0F17]' },
-  scorekeeper: { label: 'Trọng Tài', desc: 'Nhập điểm từng quả và kết quả nhanh.', cls: 'bg-[#06B6D4] text-[#0B0F17]' },
+  admin: { label: 'Admin', desc: 'Toàn quyền: phân quyền, tạo & khoá giải, mở lại và xoá giải đã kết thúc.', cls: 'bg-amber-500/10 text-amber-300' },
+  organizer: { label: 'Ban Tổ Chức', desc: 'Tạo giải, ghép cặp, chia bảng, gán trọng tài, quản lý thành viên, đóng giải.', cls: 'bg-white/10 text-slate-100' },
+  scorekeeper: { label: 'Trọng Tài', desc: 'Nhập điểm từng quả và kết quả nhanh.', cls: 'bg-sky-500/10 text-sky-300' },
 };
-const ROLE_OPTIONS = (['organizer', 'scorekeeper', 'admin'] as StaffRole[]).map((r) => ({ id: r, label: ROLE_META[r].label }));
+const ROLE_ORDER: StaffRole[] = ['organizer', 'scorekeeper', 'admin'];
 
 export default function AdminPage() {
   const auth = useAuth();
@@ -85,135 +91,118 @@ export default function AdminPage() {
 
   let body;
   if (auth.loading) {
-    body = <div className="flex items-center justify-center gap-2 py-24 text-slate-500"><Loader2 className="h-5 w-5 animate-spin" /> Đang kiểm tra quyền…</div>;
+    body = <div className={`flex items-center justify-center gap-2 py-24 ${T3} text-slate-500`}><Loader2 className="h-5 w-5 animate-spin" /> Đang kiểm tra quyền…</div>;
   } else if (!auth.session) {
     body = (
-      <EmptyState icon={Lock} title="Khu vực Admin">
+      <Empty>
+        <Lock className="mx-auto mb-2 h-6 w-6 text-slate-500" />
         <p>Đăng nhập bằng Gmail có quyền Admin để quản lý Ban tổ chức và Trọng tài.</p>
-        <button type="button" onClick={() => void auth.signInWithGoogle()} className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-[#0B0F17]">Đăng nhập Google</button>
-      </EmptyState>
+        <button type="button" onClick={() => void auth.signInWithGoogle()} className={`${BTN_PRIMARY} mt-4`}>Đăng nhập Google</button>
+      </Empty>
     );
   } else if (!auth.isAdmin) {
     body = hasAdmin === false ? (
-      <EmptyState icon={Crown} title="Thiết lập Admin đầu tiên">
-        <p>Hệ thống chưa có Admin. Gmail <b className="text-white">{auth.email}</b> sẽ trở thành Admin và có thể cấp quyền cho người khác.</p>
-        <button type="button" disabled={busy === 'claim'} onClick={() => void claim()} className="mt-4 inline-flex min-h-[48px] items-center gap-2 rounded-xl bg-[#F59E0B] px-5 pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-50">
+      <Empty>
+        <Crown className="mx-auto mb-2 h-6 w-6 text-amber-300" />
+        <p className={`${T2} text-white`}>Thiết lập Admin đầu tiên</p>
+        <p className="mt-1">Hệ thống chưa có Admin. Gmail <b className="text-white">{auth.email}</b> sẽ trở thành Admin và cấp quyền cho người khác.</p>
+        <button type="button" disabled={busy === 'claim'} onClick={() => void claim()} className={`${BTN_PRIMARY} mt-4`}>
           <Crown className="h-4 w-4" /> {busy === 'claim' ? 'Đang xử lý…' : 'Nhận quyền Admin'}
         </button>
-      </EmptyState>
+      </Empty>
     ) : (
-      <EmptyState icon={Lock} title="Chỉ dành cho Admin">
-        <p>Gmail <b className="text-white">{auth.email}</b> chưa có quyền Admin. Hãy nhờ Admin hiện tại cấp quyền.</p>
-      </EmptyState>
+      <Empty>
+        <Lock className="mx-auto mb-2 h-6 w-6 text-slate-500" />
+        Gmail <b className="text-white">{auth.email}</b> chưa có quyền Admin. Hãy nhờ Admin hiện tại cấp quyền.
+      </Empty>
     );
   } else {
     const counts = (r: StaffRole) => rows?.filter((x) => x.role === r).length ?? 0;
     body = (
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-3 gap-2">
+        <dl className="grid grid-cols-3 gap-2">
           {(['admin', 'organizer', 'scorekeeper'] as StaffRole[]).map((r) => (
-            <Card key={r} className="p-3">
-              <span className={`inline-block rounded px-1.5 py-0.5 pm-display text-[10px] font-bold uppercase ${ROLE_META[r].cls}`}>{ROLE_META[r].label}</span>
-              <p className="mt-1 pm-num text-3xl font-extrabold text-white">{counts(r)}</p>
-            </Card>
+            <div key={r} className={`${CARD} p-3`}>
+              <dt><span className={`${T4} rounded-md px-1.5 py-0.5 ${ROLE_META[r].cls}`}>{ROLE_META[r].label}</span></dt>
+              <dd className={`pm-num ${T1} mt-1 text-white`}>{counts(r)}</dd>
+            </div>
           ))}
-        </div>
+        </dl>
 
-        <Card>
-          <SectionTitle icon={Plus} eyebrow="Mời người dùng">Cấp quyền bằng Gmail</SectionTitle>
-          <form onSubmit={add} className="flex flex-col gap-3 p-4">
-            <div>
-              <label htmlFor="pm-role-email" className="mb-1 block text-xs text-slate-500">Địa chỉ Gmail</label>
+        <section className={`${CARD} p-4`}>
+          <h2 className={`${T2} text-white`}>Cấp quyền bằng Gmail</h2>
+          <p className={`${T4} text-slate-500`}>Người được cấp chỉ cần đăng nhập Google bằng đúng Gmail này.</p>
+          <form onSubmit={add} className="mt-3 flex flex-col gap-3">
+            <Field label="ĐỊA CHỈ GMAIL" htmlFor="pm-role-email">
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input
-                  id="pm-role-email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="off"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ten.cua.ban@gmail.com"
-                  className="min-h-[48px] w-full rounded-xl border border-[#374151] bg-[#0B0F17] pl-9 pr-3 text-sm text-white placeholder:text-slate-600"
-                />
+                <input id="pm-role-email" type="email" inputMode="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ten.cua.ban@gmail.com" className={`${INPUT} pl-9`} />
               </div>
-            </div>
-            <div>
-              <p className="mb-1 text-xs text-slate-500">Vai trò</p>
-              <Segmented full value={role} onChange={setRole} options={ROLE_OPTIONS} />
-              <p className="mt-1.5 text-xs text-slate-500">{ROLE_META[role].desc}</p>
-            </div>
-            <div>
-              <label htmlFor="pm-role-note" className="mb-1 block text-xs text-slate-500">Ghi chú (tuỳ chọn)</label>
-              <input id="pm-role-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="VD: Trọng tài sân 2" className="min-h-[44px] w-full rounded-xl border border-[#374151] bg-[#0B0F17] px-3 text-sm text-white placeholder:text-slate-600" />
-            </div>
-            <button type="submit" disabled={busy === 'add' || !email.trim()} className="min-h-[48px] rounded-xl bg-[#A3E635] pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-40">
-              {busy === 'add' ? 'Đang lưu…' : 'Cấp quyền'}
-            </button>
-            <p className="text-xs text-slate-500">Người được cấp chỉ cần đăng nhập Google bằng đúng Gmail này, không cần làm gì thêm.</p>
+            </Field>
+            <Field label="VAI TRÒ">
+              <Segmented full label="Vai trò" value={role} onChange={setRole} options={ROLE_ORDER.map((r) => ({ id: r, label: ROLE_META[r].label }))} />
+            </Field>
+            <p className={`${T4} -mt-1 text-slate-500`}>{ROLE_META[role].desc}</p>
+            <Field label="GHI CHÚ (TUỲ CHỌN)" htmlFor="pm-role-note">
+              <input id="pm-role-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="VD: Trọng tài sân 2" className={INPUT} />
+            </Field>
+            <button type="submit" disabled={busy === 'add' || !email.trim()} className={BTN_PRIMARY}>{busy === 'add' ? 'Đang lưu…' : 'Cấp quyền'}</button>
           </form>
-        </Card>
+        </section>
 
-        <Card>
-          <SectionTitle icon={ShieldCheck} eyebrow="Danh sách">{rows ? `${rows.length} người có quyền` : 'Đang tải…'}</SectionTitle>
-          <div className="hidden grid-cols-[minmax(0,1fr)_220px_120px] gap-3 px-4 py-2 pm-display text-[11px] font-bold uppercase tracking-wider text-slate-500 md:grid">
-            <span>Gmail</span><span>Vai trò</span><span className="text-right">Thao tác</span>
-          </div>
-          <ul>
-            {rows?.map((r) => {
-              const me = r.email === auth.email;
-              return (
-                <li key={r.id} className="flex flex-col gap-3 border-t border-[#374151]/60 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_220px_120px] md:items-center">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 truncate text-sm font-semibold text-white">
-                      {r.email}
-                      {me && <span className="rounded bg-[#1F2937] px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-300">Bạn</span>}
+        <StripGroup title="Người có quyền" right={<span className={`${T4} text-slate-500`}>{rows ? `${rows.length} người` : 'Đang tải…'}</span>}>
+          {rows?.map((r) => {
+            const me = r.email === auth.email;
+            return (
+              <div key={r.id} className="flex flex-col gap-2 px-4 py-3">
+                <div className="flex min-h-[40px] items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className={`${T3} flex items-center gap-2 truncate text-slate-100`}>
+                      <span className="truncate">{r.email}</span>
+                      {me && <span className={`${T4} rounded-md bg-white/10 px-1.5 py-0.5 text-slate-300`}>Bạn</span>}
                     </p>
-                    <p className="truncate text-xs text-slate-500">{r.note || `Thêm ngày ${new Date(r.created_at).toLocaleDateString('vi-VN')}`}</p>
+                    <p className={`${T4} truncate text-slate-500`}>{r.note || `Thêm ngày ${new Date(r.created_at).toLocaleDateString('vi-VN')}`}</p>
                   </div>
-                  <div>
-                    <label htmlFor={`pm-role-${r.id}`} className="sr-only">Vai trò của {r.email}</label>
-                    <select
-                      id={`pm-role-${r.id}`}
-                      value={r.role}
-                      disabled={busy === r.id}
-                      onChange={(e) => void change(r, e.target.value as StaffRole)}
-                      className="min-h-[44px] w-full rounded-xl border border-[#374151] bg-[#0B0F17] px-3 text-sm font-semibold text-white"
-                    >
-                      {ROLE_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                    </select>
+                  <label htmlFor={`pm-role-${r.id}`} className="sr-only">Vai trò của {r.email}</label>
+                  <select
+                    id={`pm-role-${r.id}`}
+                    value={r.role}
+                    disabled={busy === r.id}
+                    onChange={(e) => void change(r, e.target.value as StaffRole)}
+                    className={`h-9 rounded-lg border border-white/10 bg-slate-950 px-2 ${T4} text-slate-200`}
+                  >
+                    {ROLE_ORDER.map((o) => <option key={o} value={o}>{ROLE_META[o].label}</option>)}
+                  </select>
+                  {confirmId !== r.id && (
+                    <button type="button" aria-label={`Thu hồi quyền của ${r.email}`} onClick={() => setConfirmId(r.id)} className={`${ICON_BTN} hover:bg-rose-500/10 hover:text-rose-300`}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {confirmId === r.id && (
+                  <div className="flex items-center justify-end gap-2">
+                    <span className={`${T4} mr-auto text-rose-200`}>Thu hồi quyền của {r.email}?</span>
+                    <button type="button" onClick={() => setConfirmId(null)} className={`h-9 rounded-lg px-3 ${T4} text-slate-400 hover:bg-white/5`}>Huỷ</button>
+                    <button type="button" disabled={busy === r.id} onClick={() => void revoke(r)} className={`h-9 rounded-lg bg-rose-500/15 px-3 ${T4} text-rose-300 disabled:opacity-50`}>Thu hồi</button>
                   </div>
-                  <div className="flex justify-end">
-                    {confirmId === r.id ? (
-                      <span className="flex gap-1">
-                        <button type="button" onClick={() => setConfirmId(null)} className="min-h-[44px] rounded-lg px-3 text-xs text-slate-400">Huỷ</button>
-                        <button type="button" disabled={busy === r.id} onClick={() => void revoke(r)} className="min-h-[44px] rounded-lg bg-rose-500/20 px-3 text-xs font-bold text-rose-300">Thu hồi</button>
-                      </span>
-                    ) : (
-                      <button type="button" onClick={() => setConfirmId(r.id)} className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-slate-400 hover:bg-rose-500/10 hover:text-rose-300">
-                        <Trash2 className="h-4 w-4" /> Thu hồi
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-            {rows && rows.length === 0 && <li className="px-4 py-8 text-center text-sm text-slate-500">Chưa có ai.</li>}
-          </ul>
-        </Card>
+                )}
+              </div>
+            );
+          })}
+          {rows && rows.length === 0 && <p className={`px-4 py-8 text-center ${T3} text-slate-500`}>Chưa có ai.</p>}
+        </StripGroup>
       </div>
     );
   }
 
   return (
-    <div className="pm-root min-h-screen bg-[#0B0F17] text-slate-200">
-      <Navbar liveCount={0} auth={auth} connected />
-      <main className={`mx-auto flex max-w-3xl flex-col gap-4 px-4 pt-4 md:pb-12 md:pt-6 ${auth.isStaff ? 'pb-32' : 'pb-16'}`}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <Link href="/?mode=admin" className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white"><ArrowLeft className="h-3.5 w-3.5" /> Về Ban tổ chức</Link>
-            <h1 className="flex items-center gap-2 pm-display text-3xl font-extrabold uppercase leading-none text-white"><UserCog className="h-7 w-7 text-[#F59E0B]" /> Phân quyền</h1>
-          </div>
+    <div className="pm-root min-h-screen bg-slate-950 text-slate-200">
+      <Navbar auth={auth} />
+      <main className="mx-auto flex max-w-3xl flex-col gap-4 px-4 pb-16 pt-4">
+        <div>
+          <Link href="/?screen=btc" className={`mb-1 inline-flex items-center gap-1 ${T4} text-slate-400 hover:text-white`}><ArrowLeft className="h-3.5 w-3.5" /> Về Ban tổ chức</Link>
+          <p className={`${T4} text-slate-500`}>ADMIN</p>
+          <h1 className={`${T1} text-white`}>Phân quyền Gmail</h1>
         </div>
         {body}
       </main>

@@ -4,7 +4,7 @@
    ===================================================================== */
 import type {
   EventVM, GroupConfig, KnockoutSeed, MatchActionType, MatchRow, MatchType, MatchVM, PlayerRow, PodiumEntry, PodiumVM,
-  RulesConfig, ServerState, StandingRow, TeamVM, TieBreaker, TournamentVM,
+  RulesConfig, ServerState, StandingRow, TeamVM, TieBreaker, TournamentRow, TournamentStatusTag, TournamentVM,
 } from './types';
 
 export const GROUP_LETTERS = ['A', 'B', 'C', 'D'] as const;
@@ -236,6 +236,8 @@ export function buildViewModel(input: {
         server: st.server,
         historyLength: st.history?.length ?? 0,
         updatedAt: m.updated_at,
+        referee: m.referee ?? null,
+        game: 1,
       };
     });
 
@@ -353,6 +355,10 @@ export function applyActionLocal(row: MatchRow, action: MatchActionType): MatchR
 export const RPC_ERRORS: Record<string, string> = {
   FORBIDDEN: 'Bạn chưa có quyền thực hiện thao tác này.',
   TOURNAMENT_LOCKED: 'Giải đấu đã kết thúc. Không thể thay đổi kết quả.',
+  // Longer codes first: friendlyError matches by substring in insertion order
+  ADMIN_ONLY_DELETE: 'Chỉ Admin mới xoá được giải đã kết thúc.',
+  TOURNAMENT_NOT_FOUND: 'Không tìm thấy giải đấu (có thể đã bị xoá).',
+  matches_referee_len: 'Tên trọng tài tối đa 60 ký tự.',
   ADMIN_ONLY: 'Chỉ Admin mới mở lại được giải đã kết thúc.',
   LAST_ADMIN: 'Phải còn ít nhất một Admin. Hãy thêm Admin khác trước.',
   ADMIN_EXISTS: 'Hệ thống đã có Admin.',
@@ -453,3 +459,108 @@ export function podiumFor(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): P
       : rows.slice(0, 3).map((r, i) => ({ place: (i + 1) as 1 | 2 | 3, team: r.team, source: 'standings' as const, stats: { w: r.w, l: r.l, diff: r.diff } })),
   };
 }
+
+/* ---------------------------- v1.2: pairing (Bước 2.2) ---------------------------- */
+
+/** Deterministic PRNG (mulberry32) so "Bốc thăm lại" is reproducible per seed. */
+export function seededRandom(seed: number) {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const ratingOf = (players: PlayerRow[], id: string) => players.find((p) => p.id === id)?.skill_rating ?? 0;
+export const pairSum = (pids: string[], players: PlayerRow[]) => pids.reduce((s, id) => s + ratingOf(players, id), 0);
+
+/**
+ * ⚖️ Cân bằng theo trình: start with top + bottom, then keep swapping partners between
+ * two pairs while it lowers the variance of pair totals (local search, converges fast).
+ */
+export function pairBalanced(pool: PlayerRow[], players: PlayerRow[] = pool): string[][] {
+  const s = [...pool].sort((a, b) => b.skill_rating - a.skill_rating);
+  const n = Math.floor(s.length / 2);
+  let pairs = Array.from({ length: n }, (_, i) => [s[i].id, s[s.length - 1 - i].id]);
+  const cost = (ps: string[][]) => {
+    const sums = ps.map((p) => pairSum(p, players));
+    const mean = sums.reduce((a, b) => a + b, 0) / (sums.length || 1);
+    return sums.reduce((a, x) => a + (x - mean) ** 2, 0);
+  };
+  let best = cost(pairs);
+  for (let pass = 0, improved = true; improved && pass < 40; pass++) {
+    improved = false;
+    for (let i = 0; i < pairs.length; i++) {
+      for (let j = i + 1; j < pairs.length; j++) {
+        for (const [a, b] of [[0, 0], [0, 1], [1, 0], [1, 1]] as const) {
+          const trial = pairs.map((p) => [...p]);
+          [trial[i][a], trial[j][b]] = [trial[j][b], trial[i][a]];
+          const c = cost(trial);
+          if (c + 1e-9 < best) { best = c; pairs = trial; improved = true; }
+        }
+      }
+    }
+  }
+  return pairs;
+}
+
+/** 🔄 Cân bằng A-B: upper half by rating = nhóm A, lower half = nhóm B; each A draws one B. */
+export function pairAB(pool: PlayerRow[], seed: number): string[][] {
+  const s = [...pool].sort((a, b) => b.skill_rating - a.skill_rating);
+  const n = Math.floor(s.length / 2);
+  const A = s.slice(0, n);
+  const B = s.slice(n, n * 2);
+  const r = seededRandom(seed);
+  for (let i = B.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [B[i], B[j]] = [B[j], B[i]];
+  }
+  return A.map((a, i) => [a.id, B[i].id]);
+}
+
+/** Difference between the strongest and weakest pair (average rating). */
+export function pairSpread(pairs: string[][], players: PlayerRow[]) {
+  if (!pairs.length) return 0;
+  const avgs = pairs.map((p) => pairSum(p, players) / p.length);
+  return Math.max(...avgs) - Math.min(...avgs);
+}
+
+/** Snake-assign draft pairs (by index) into `numGroups` groups: A-B-B-A… */
+export function snakeByIndex(pairs: string[][], numGroups: number, players: PlayerRow[]): Record<number, string> {
+  const asg = snakeAssign(pairs.map((pids, i) => ({ id: String(i), pids })), numGroups, players);
+  return Object.fromEntries(Object.entries(asg).map(([k, g]) => [Number(k), g]));
+}
+
+/* ---------------------------- v1.2: tournament helpers ---------------------------- */
+
+export const courtNames = (n: number) => Array.from({ length: Math.max(1, Math.min(4, n)) }, (_, i) => `Sân ${i + 1}`);
+
+export const STATUS_TAG: Record<TournamentStatusTag, { label: string; cls: string }> = {
+  upcoming: { label: 'Sắp diễn ra', cls: 'bg-sky-500/10 text-sky-300' },
+  ongoing: { label: 'Đang thi đấu', cls: 'bg-white/10 text-slate-100' },
+  completed: { label: 'Đã kết thúc', cls: 'bg-amber-500/10 text-amber-300' },
+};
+
+/** draft → Sắp diễn ra · ongoing → Đang thi đấu · completed → Đã kết thúc */
+export const statusTagOf = (t: Pick<TournamentRow, 'status'>): TournamentStatusTag =>
+  t.status === 'completed' ? 'completed' : t.status === 'draft' ? 'upcoming' : 'ongoing';
+
+/** ISO timestamp → yyyy-mm-dd in local time (for <input type="date">) */
+export const dateInputOf = (iso: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/** yyyy-mm-dd → ISO at 08:00 local time (default first-match time) */
+export const startsAtOf = (date: string) => (date ? new Date(`${date}T08:00:00`).toISOString() : null);
+
+export const fmtDateVN = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Chưa đặt ngày';
+
+/** Group name shown in score strips: "Bảng A", "Vòng bảng" or the knockout stage. */
+export const stageLabelOf = (m: Pick<MatchVM, 'type' | 'group'>) =>
+  m.type === 'group' ? (m.group ? `Bảng ${m.group}` : 'Vòng bảng') : MATCH_TYPE_LABEL[m.type];

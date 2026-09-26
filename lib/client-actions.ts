@@ -56,8 +56,14 @@ export async function applyEventSetup(opts: {
     courts: opts.tournament.rules_config.courts.length,
     orderOffset: opts.orderOffset,
   });
-  const { error } = await getSupabase().rpc('apply_event_setup', { p_event: opts.eventId, p_payload: payload });
+  const sb = getSupabase();
+  const { error } = await sb.rpc('apply_event_setup', { p_event: opts.eventId, p_payload: payload });
   if (error) fail(error);
+  // First schedule created → "Sắp diễn ra" becomes "Đang thi đấu"
+  if (opts.tournament.status === 'draft') {
+    const { error: e2 } = await sb.from('tournaments').update({ status: 'ongoing' }).eq('id', opts.tournament.id);
+    if (e2) fail(e2);
+  }
   const store = getTournamentStore(opts.tournament.id);
   await Promise.all([store.loadSetup(), store.loadMatches()]);
 }
@@ -97,6 +103,16 @@ function roundUpNow() {
   const d = new Date();
   d.setMinutes(Math.ceil(d.getMinutes() / 10) * 10 + 10, 0, 0);
   return d;
+}
+
+/**
+ * Gán trọng tài cho một sân (Bước 3). Lưu vào rules_config.referees để trận kế tiếp
+ * lên sân tự nhận (trigger DB), và cập nhật luôn trận đang đấu trên sân đó.
+ */
+export async function assignCourtReferee(tournament: TournamentRow, court: string, name: string) {
+  const { error } = await getSupabase().rpc('set_court_referee', { p_tournament: tournament.id, p_court: court, p_name: name });
+  if (error) fail(error);
+  await refreshTournament(tournament.id);
 }
 
 /** Pull fresh data after a Server Action (realtime will also deliver it). */

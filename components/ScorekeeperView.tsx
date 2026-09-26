@@ -1,15 +1,23 @@
 'use client';
 
-import { Activity, CheckCircle2, ChevronRight, ClipboardEdit, Clock, Crown, Lock, Minus, Play, Plus, RefreshCw, Undo2 } from 'lucide-react';
+import { Activity, CheckCircle2, ClipboardEdit, Clock, Lock, Minus, Play, Plus, RefreshCw, Undo2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { callNextMatch, finalizeMatch, matchAction } from '@/lib/client-actions';
-import { isGameOver, MATCH_TYPE_LABEL, MATCH_TYPE_SHORT, scoreCall, teamName } from '@/lib/engine';
+import { isGameOver, scoreCall, stageLabelOf, teamName } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
-import type { CourtVM, MatchActionType, TournamentVM, UIState } from '@/lib/types';
-import { MatchRow } from './Standings';
-import { CYAN, Card, EmptyState, GroupBadge, LIME, LiveBadge, SectionTitle, Segmented, ServeBall } from './ui';
+import type { CourtVM, MatchActionType, MatchVM, TournamentVM, UIState } from '@/lib/types';
+import {
+  BTN_GHOST, BTN_PRIMARY, CARD, Confirm, Empty, INPUT, LiveBadge, Segmented, ServeDot, StripGroup, SURFACE, T2, T3, T4,
+  type Toast,
+} from './kit';
+import { ScoreStrip } from './PublicView';
 
-type Toast = (msg: string, kind?: 'ok' | 'error') => void;
+/* =====================================================================
+   Trọng Tài — nhập điểm (approved v4 demo skin)
+   · Từng quả: +1 điểm, người giao, đổi giao, hủy quả, kết thúc trận (RPC có khoá dòng)
+   · Kết quả nhanh: chọn trận, nhập tỉ số chung cuộc
+   Exception to the type scale: the big score digits, so the referee can read them at a glance.
+   ===================================================================== */
 
 /* ======================= Live point-by-point pad ======================= */
 function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: TournamentVM; hiddenOnMobile: boolean; toast: Toast }) {
@@ -18,7 +26,7 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
   const [bump, setBump] = useState<'A' | 'B' | null>(null);
   const [busy, setBusy] = useState(false);
   const rules = vm.rules;
-  const wrap = `${hiddenOnMobile ? 'hidden lg:block' : ''} mx-auto w-full max-w-[440px]`;
+  const wrap = `${hiddenOnMobile ? 'hidden lg:block' : ''} w-full`;
 
   const run = async (action: MatchActionType) => {
     if (!match) return;
@@ -33,9 +41,9 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
     const pending = vm.matches.some((m) => m.status === 'upcoming');
     return (
       <div className={wrap}>
-        <Card className="flex flex-col items-center gap-3 p-8 text-center text-slate-400">
-          <CheckCircle2 className="h-8 w-8 text-[#A3E635]" />
-          <p>{court.name} đang trống.</p>
+        <div className={`${CARD} flex flex-col items-center gap-3 p-8 text-center`}>
+          <p className={`${T2} text-white`}>{court.name}</p>
+          <p className={`${T3} text-slate-400`}>{pending ? 'Sân đang trống. Gọi trận kế tiếp có đội rảnh.' : 'Sân đang trống. Không còn trận nào chờ.'}</p>
           {pending && (
             <button
               type="button"
@@ -51,12 +59,12 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
                   setBusy(false);
                 }
               }}
-              className="inline-flex min-h-[48px] items-center gap-2 rounded-xl bg-[#A3E635] px-4 pm-display text-base font-bold uppercase text-[#0B0F17] disabled:opacity-50"
+              className={BTN_PRIMARY}
             >
-              <Play className="h-4 w-4" /> Gọi trận kế tiếp
+              <Play className="h-4 w-4" /> {busy ? 'Đang gọi…' : 'Gọi trận kế tiếp'}
             </button>
           )}
-        </Card>
+        </div>
       </div>
     );
   }
@@ -66,7 +74,8 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
   const ev = vm.events.find((e) => e.id === match.eventId);
   const singles = !!ev?.singles;
   const over = isGameOver(match.sa, match.sb, rules);
-  const gamePoint = (s: number, o: number) => s >= rules.target - 1 && s - o >= rules.winBy - 1 && !over;
+  const gamePoint = (s: number, o: number) => !over && s >= rules.target - 1 && s - o >= rules.winBy - 1;
+  const winner = match.sa > match.sb ? A : B;
 
   const point = (side: 'A' | 'B') => {
     void run(side === 'A' ? 'point_a' : 'point_b');
@@ -74,43 +83,12 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
     setTimeout(() => setBump(null), 360);
   };
 
-  const panel = (key: 'A' | 'B', team: typeof A, score: number, other: number) => {
-    const serving = match.serving === key;
-    const accent = key === 'A' ? LIME : CYAN;
-    return (
-      <div className={`rounded-2xl border p-3 ${serving ? 'border-[#A3E635]/50 bg-[#A3E635]/[0.05]' : 'border-[#374151] bg-[#0B0F17]'}`}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <span className="pm-display text-xs font-bold uppercase" style={{ color: accent }}>Đội {key}</span>
-            <div className="truncate text-base font-bold text-white">{teamName(team, vm.players)}</div>
-            <div className="mt-1 flex h-5 items-center gap-1.5 text-xs">
-              {serving ? (
-                <><ServeBall className="h-3 w-3" /><span className="font-semibold text-[#A3E635]">{singles ? 'Đang giao' : `Giao bóng ${match.server}`}</span></>
-              ) : <span className="text-slate-600">Đỡ giao</span>}
-              {gamePoint(score, other) && <span className="ml-1 rounded bg-[#F59E0B] px-1.5 py-0.5 pm-display text-[10px] font-bold uppercase text-[#0B0F17]">Game point</span>}
-            </div>
-          </div>
-          <span className={`pm-num text-6xl font-extrabold leading-none text-white ${bump === key ? 'pm-pop' : ''}`}>{score}</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => point(key)}
-          disabled={over}
-          className="mt-3 flex h-[72px] w-full items-center justify-center gap-2 rounded-xl pm-display text-2xl font-extrabold uppercase text-[#0B0F17] transition active:scale-[0.98] disabled:opacity-30"
-          style={{ background: accent }}
-        >
-          <Plus className="h-7 w-7" strokeWidth={3} /> 1 điểm Đội {key}
-        </button>
-      </div>
-    );
-  };
-
   const end = async () => {
     setBusy(true);
     try {
       await finalizeMatch(vm.tournament.id, match.id, match.sa, match.sb);
       setConfirm(false);
-      toast(`Đã kết thúc trận trên ${court.name}`);
+      toast(`${court.name}: đã lưu kết quả ${Math.max(match.sa, match.sb)}–${Math.min(match.sa, match.sb)}`);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -118,110 +96,118 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
     }
   };
 
-  const badge = match.type === 'group' ? match.group : MATCH_TYPE_SHORT[match.type];
+  const panel = (key: 'A' | 'B', team: typeof A, score: number, other: number) => {
+    const serving = match.serving === key;
+    return (
+      <div className={`rounded-xl border bg-slate-950 p-3 ${serving ? 'border-[#84CC16]/30' : 'border-white/5'}`}>
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className={`${T4} text-slate-500`}>ĐỘI {key}</p>
+            <p className={`${T2} truncate text-white`}>{teamName(team, vm.players)}</p>
+            <p className={`${T4} mt-0.5 flex h-4 items-center gap-1.5 text-slate-400`}>
+              {serving ? <><ServeDot /> {singles ? 'Đang giao bóng' : `Giao bóng ${match.server}`}</> : 'Đỡ giao'}
+              {gamePoint(score, other) && <span className="rounded bg-amber-500/15 px-1.5 text-amber-300">GAME POINT</span>}
+            </p>
+          </div>
+          {/* Exception to the type scale: glanceable referee score */}
+          <span className={`pm-num w-16 text-right text-5xl font-extrabold leading-none text-[#84CC16] ${bump === key ? 'pm-pop' : ''}`} aria-live="polite">{score}</span>
+        </div>
+        <button type="button" onClick={() => point(key)} disabled={over} className={`mt-3 ${BTN_PRIMARY} h-14 w-full`}>
+          <Plus className="h-5 w-5" /> 1 điểm Đội {key}
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div className={wrap}>
-      <Card className="p-3">
-        <div className="mb-3 flex items-center justify-between gap-2">
+      <div className={`${CARD} flex flex-col gap-3 p-4`}>
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="pm-display text-2xl font-extrabold uppercase leading-none text-white">{court.name}</div>
-            <div className="mt-1 flex items-center gap-1.5 truncate text-xs text-slate-400">
-              <GroupBadge g={badge} size="sm" /> {ev?.label} · {match.type === 'group' ? `Lượt ${match.round}` : MATCH_TYPE_LABEL[match.type]} · Tới {rules.target}, cách {rules.winBy}
-            </div>
+            <p className={`${T2} text-white`}>{court.name}</p>
+            <p className={`${T4} truncate text-slate-500`}>
+              {[ev?.short, stageLabelOf(match), `Tới ${rules.target}, cách ${rules.winBy}`].filter(Boolean).join(' · ')}
+            </p>
           </div>
-          <LiveBadge />
+          <LiveBadge label={`LIVE · Hiệp ${match.game}`} />
         </div>
 
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-[#0B0F17] px-3 py-2">
-          <span className="text-[11px] uppercase tracking-wider text-slate-500">Gọi điểm</span>
-          <span className="pm-num text-2xl font-extrabold text-[#F59E0B]">{scoreCall(match, singles)}</span>
+        <div className="flex items-center justify-between rounded-xl bg-slate-950 px-3 py-2">
+          <span className={`${T4} text-slate-500`}>GỌI ĐIỂM</span>
+          <span className={`pm-num ${T2} text-slate-100`}>{scoreCall(match, singles)}</span>
         </div>
 
-        <div className="flex flex-col gap-2">
-          {panel('A', A, match.sa, match.sb)}
-          {panel('B', B, match.sb, match.sa)}
-        </div>
+        {panel('A', A, match.sa, match.sb)}
+        {panel('B', B, match.sb, match.sa)}
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button type="button" onClick={() => void run('toggle_server')} disabled={singles} className="flex h-[68px] flex-col items-center justify-center rounded-xl border border-[#374151] bg-[#1F2937] text-white disabled:opacity-30">
-            <span className="pm-num text-xl font-extrabold text-[#A3E635]">{match.server === 1 ? '1 → 2' : '2 → 1'}</span>
-            <span className="text-[11px] text-slate-400">Người giao</span>
+        <div className="grid grid-cols-3 gap-2">
+          <button type="button" onClick={() => void run('toggle_server')} disabled={singles} className={`${BTN_GHOST} h-14 flex-col gap-0.5 px-2`}>
+            <span className={`pm-num ${T2}`}>{match.server === 1 ? '1→2' : '2→1'}</span>
+            <span className={`${T4} text-slate-500`}>Người giao</span>
           </button>
-          <button type="button" onClick={() => void run('side_out')} className="flex h-[68px] flex-col items-center justify-center rounded-xl border border-[#374151] bg-[#1F2937] text-white">
-            <RefreshCw className="h-5 w-5 text-[#06B6D4]" />
-            <span className="mt-1 text-[11px] text-slate-400">Đổi giao</span>
+          <button type="button" onClick={() => void run('side_out')} className={`${BTN_GHOST} h-14 flex-col gap-0.5 px-2`}>
+            <RefreshCw className="h-4 w-4" />
+            <span className={`${T4} text-slate-500`}>Đổi giao</span>
           </button>
-          <button type="button" onClick={() => void run('undo')} disabled={match.historyLength === 0} className="flex h-[68px] flex-col items-center justify-center rounded-xl border border-[#374151] bg-[#1F2937] text-white disabled:opacity-30">
-            <Undo2 className="h-5 w-5 text-[#F59E0B]" />
-            <span className="mt-1 text-[11px] text-slate-400">Hủy quả vừa rồi</span>
+          <button type="button" onClick={() => void run('undo')} disabled={match.historyLength === 0} className={`${BTN_GHOST} h-14 flex-col gap-0.5 px-2`}>
+            <Undo2 className="h-4 w-4" />
+            <span className={`${T4} text-slate-500`}>Hủy quả</span>
           </button>
         </div>
 
-        {!confirm ? (
-          <button
-            type="button"
-            onClick={() => setConfirm(true)}
-            className={`mt-2 flex h-14 w-full items-center justify-center gap-2 rounded-xl pm-display text-lg font-bold uppercase transition ${over ? 'bg-[#F59E0B] text-[#0B0F17]' : 'border border-rose-500/50 text-rose-300'}`}
-          >
-            <CheckCircle2 className="h-5 w-5" /> Kết thúc trận đấu
-          </button>
+        {confirm ? (
+          <Confirm
+            busy={busy}
+            text={match.sa === match.sb
+              ? `Tỉ số đang hoà ${match.sa}–${match.sb}. Cần có đội thắng trước khi kết thúc.`
+              : `Xác nhận ${teamName(winner, vm.players)} thắng ${Math.max(match.sa, match.sb)}–${Math.min(match.sa, match.sb)}?${over ? '' : ` Chưa đạt ${rules.target} điểm cách ${rules.winBy}.`}`}
+            confirmLabel="Lưu & gọi trận kế"
+            onConfirm={() => { if (match.sa !== match.sb) void end(); }}
+            onCancel={() => setConfirm(false)}
+          />
         ) : (
-          <div className="mt-2 rounded-xl border border-[#F59E0B]/50 bg-[#F59E0B]/10 p-3">
-            {match.sa === match.sb ? (
-              <p className="text-sm text-amber-200">Tỉ số đang hoà {match.sa}–{match.sb}. Cần có đội thắng trước khi kết thúc.</p>
-            ) : (
-              <p className="text-sm text-amber-100">
-                Xác nhận <b>{teamName(match.sa > match.sb ? A : B, vm.players)}</b> thắng <span className="pm-num font-bold">{Math.max(match.sa, match.sb)}–{Math.min(match.sa, match.sb)}</span>?
-                {!over && <span className="block text-xs text-amber-300/80">Chưa đạt {rules.target} điểm cách {rules.winBy}.</span>}
-              </p>
-            )}
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setConfirm(false)} className="h-12 rounded-lg border border-[#374151] text-sm font-semibold text-slate-300">Quay lại</button>
-              <button type="button" disabled={match.sa === match.sb || busy} onClick={() => void end()} className="h-12 rounded-lg bg-[#F59E0B] text-sm font-bold text-[#0B0F17] disabled:opacity-30">
-                {busy ? 'Đang lưu…' : 'Xác nhận & gọi trận kế'}
-              </button>
-            </div>
-          </div>
+          <button type="button" onClick={() => setConfirm(true)} className={over ? BTN_PRIMARY : BTN_GHOST}>
+            <CheckCircle2 className="h-4 w-4" /> Kết thúc trận
+          </button>
         )}
-      </Card>
+
+        <p className={`${T4} flex items-center gap-1.5 text-slate-500`}>
+          <UserRound className="h-3.5 w-3.5" /> Trọng tài: <span className="text-slate-300">{match.referee ?? 'Chưa phân công'}</span>
+        </p>
+      </div>
     </div>
   );
 }
 
 /* ======================= Quick final score entry ======================= */
-function ScoreStepper({ id, label, sub, value, onChange, accent }: { id: string; label: string; sub: string; value: string; onChange: (v: string) => void; accent: string }) {
+function Stepper({ id, label, sub, value, onChange }: { id: string; label: string; sub: string; value: string; onChange: (v: string) => void }) {
   const n = parseInt(value, 10);
   const set = (v: number) => onChange(String(Math.max(0, Math.min(99, v))));
   return (
-    <div className="flex items-center gap-2 rounded-2xl border border-[#374151] bg-[#0B0F17] p-3">
+    <div className={`flex items-center gap-2 ${SURFACE} p-3`}>
       <div className="min-w-0 flex-1">
-        <label htmlFor={id} className="pm-display text-xs font-bold uppercase" style={{ color: accent }}>{label}</label>
-        <div className="truncate text-sm font-semibold text-white">{sub}</div>
+        <label htmlFor={id} className={`${T4} text-slate-500`}>{label}</label>
+        <p className={`${T3} truncate text-slate-100`}>{sub}</p>
       </div>
-      <button type="button" aria-label={`Giảm điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) - 1)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#1F2937] text-white"><Minus className="h-5 w-5" /></button>
+      <button type="button" aria-label={`Giảm điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) - 1)} className={`${BTN_GHOST} w-11 px-0`}><Minus className="h-4 w-4" /></button>
       <input
         id={id}
-        type="number"
         inputMode="numeric"
         pattern="[0-9]*"
-        min={0}
-        max={99}
         value={value}
         placeholder="0"
         onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
         onFocus={(e) => e.target.select()}
-        className="h-14 w-16 shrink-0 rounded-xl border-2 bg-[#111827] text-center pm-num text-3xl font-extrabold text-white placeholder:text-slate-700"
-        style={{ borderColor: accent }}
+        className={`${INPUT} pm-num w-14 text-center ${T2}`}
       />
-      <button type="button" aria-label={`Tăng điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) + 1)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#1F2937] text-white"><Plus className="h-5 w-5" /></button>
+      <button type="button" aria-label={`Tăng điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) + 1)} className={`${BTN_GHOST} w-11 px-0`}><Plus className="h-4 w-4" /></button>
     </div>
   );
 }
 
 function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; setUi: (p: Partial<UIState>) => void; toast: Toast }) {
   const rules = vm.rules;
-  const inEvent = (m: TournamentVM['matches'][number]) => ui.quickEvent === 'all' || m.eventId === ui.quickEvent;
+  const inEvent = (m: MatchVM) => ui.quickEvent === 'all' || m.eventId === ui.quickEvent;
   const pending = vm.matches
     .filter((m) => m.status !== 'completed' && inEvent(m))
     .sort((a, b) => Number(b.status === 'live') - Number(a.status === 'live'));
@@ -254,7 +240,7 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
     try {
       await finalizeMatch(vm.tournament.id, sel.id, na, nb);
       const winner = na > nb ? A : B;
-      toast(`Đã lưu: ${teamName(winner, vm.players, true)} thắng ${Math.max(na, nb)}–${Math.min(na, nb)}${sel.group ? ` · BXH Bảng ${sel.group} đã cập nhật` : ''}`);
+      toast(`Đã lưu: ${teamName(winner, vm.players, true)} thắng ${Math.max(na, nb)}–${Math.min(na, nb)}`);
       setUi({ quickMatch: sel.status === 'completed' ? null : nextPending ? nextPending.id : null });
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -263,60 +249,53 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
     }
   };
 
-  return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="order-2 flex flex-col gap-3 lg:order-1">
-        <Segmented full size="sm" value={ui.quickEvent} onChange={(v) => setUi({ quickEvent: v })} options={[{ id: 'all', label: 'Tất cả' }, ...vm.events.map((e) => ({ id: e.id, label: e.label }))]} />
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Chưa có kết quả · {pending.length} trận</p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {pending.map((m) => <MatchRow key={m.id} m={m} vm={vm} selected={sel?.id === m.id} onClick={() => setUi({ quickMatch: m.id })} />)}
-          {pending.length === 0 && <p className="py-6 text-center text-sm text-slate-500 sm:col-span-2">Tất cả các trận đã có kết quả.</p>}
-        </div>
-        {recent.length > 0 && (
-          <>
-            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Vừa nhập · chạm để sửa</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {recent.map((m) => <MatchRow key={m.id} m={m} vm={vm} selected={sel?.id === m.id} onClick={() => setUi({ quickMatch: m.id })} />)}
-            </div>
-          </>
-        )}
-      </div>
+  const row = (m: MatchVM) => (
+    <div key={m.id} className={sel?.id === m.id ? 'bg-white/[0.05]' : ''}>
+      <ScoreStrip m={m} vm={vm} showEvent={vm.events.length > 1} onOpen={() => setUi({ quickMatch: m.id })} />
+    </div>
+  );
 
-      <div className="order-1 lg:order-2">
-        <Card className="lg:sticky lg:top-24">
-          <SectionTitle icon={ClipboardEdit} eyebrow="Nhập kết quả nhanh">
-            {sel ? `${ev?.label ?? ''} · ${sel.type === 'group' ? `Lượt ${sel.round}` : MATCH_TYPE_LABEL[sel.type]}` : 'Chọn một trận'}
-          </SectionTitle>
-          {!sel ? (
-            <p className="p-4 text-sm text-slate-400">Chạm vào một trận bên dưới để nhập tỉ số chung cuộc. Dùng cho các sân không có trọng tài bàn.</p>
-          ) : (
-            <div className="flex flex-col gap-3 p-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                <GroupBadge g={sel.type === 'group' ? sel.group : MATCH_TYPE_SHORT[sel.type]} size="sm" />
-                {sel.status === 'live' && <><LiveBadge /><span>Đang đấu ở {sel.court}</span></>}
-                {sel.status === 'completed' && <span className="text-[#F59E0B]">Sửa kết quả đã nhập</span>}
-                {sel.status === 'upcoming' && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />Dự kiến {sel.time}</span>}
-              </div>
-              <ScoreStepper id="pm-qa" label="Đội A" sub={teamName(A, vm.players)} value={sa} onChange={setSa} accent={LIME} />
-              <ScoreStepper id="pm-qb" label="Đội B" sub={teamName(B, vm.players)} value={sb} onChange={setSb} accent={CYAN} />
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setSa(String(rules.target))} className="min-h-[40px] rounded-lg border border-[#374151] text-xs font-semibold text-slate-300">Đội A thắng {rules.target}</button>
-                <button type="button" onClick={() => setSb(String(rules.target))} className="min-h-[40px] rounded-lg border border-[#374151] text-xs font-semibold text-slate-300">Đội B thắng {rules.target}</button>
-              </div>
-              {tie && <p className="text-xs text-rose-400">Tỉ số không được hoà. Pickleball luôn có đội thắng.</p>}
-              {offRule && <p className="text-xs text-amber-300">Tỉ số chưa đúng luật {rules.target} điểm cách {rules.winBy}. Vẫn lưu được nếu trận rút ngắn.</p>}
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!filled || tie || busy}
-                className="flex min-h-[56px] items-center justify-center gap-2 rounded-xl bg-[#A3E635] pm-display text-lg font-extrabold uppercase text-[#0B0F17] disabled:opacity-35"
-              >
-                <CheckCircle2 className="h-5 w-5" /> {busy ? 'Đang lưu…' : 'Xác nhận kết quả'}
-              </button>
-            </div>
-          )}
-        </Card>
-      </div>
+  return (
+    <div className="flex flex-col gap-4">
+      {vm.events.length > 1 && (
+        <Segmented full label="Nội dung" value={ui.quickEvent} onChange={(v) => setUi({ quickEvent: v })}
+          options={[{ id: 'all', label: 'Tất cả' }, ...vm.events.map((e) => ({ id: e.id, label: e.short || e.label }))]} />
+      )}
+
+      {sel ? (
+        <div className={`${CARD} flex flex-col gap-3 p-4`}>
+          <div className="flex items-center justify-between gap-2">
+            <p className={`${T2} truncate text-white`}>{[ev?.label, stageLabelOf(sel)].filter(Boolean).join(' · ')}</p>
+            {sel.status === 'live' ? <LiveBadge label={sel.court ?? 'LIVE'} />
+              : sel.status === 'completed' ? <span className={`${T4} text-amber-300`}>Sửa kết quả</span>
+              : <span className={`${T4} inline-flex items-center gap-1 text-slate-400`}><Clock className="h-3 w-3" />{sel.time || 'Chưa xếp giờ'}</span>}
+          </div>
+          <Stepper id="pm-qa" label="ĐỘI A" sub={teamName(A, vm.players)} value={sa} onChange={setSa} />
+          <Stepper id="pm-qb" label="ĐỘI B" sub={teamName(B, vm.players)} value={sb} onChange={setSb} />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setSa(String(rules.target))} className={`${BTN_GHOST} min-h-[36px]`}>Đội A thắng {rules.target}</button>
+            <button type="button" onClick={() => setSb(String(rules.target))} className={`${BTN_GHOST} min-h-[36px]`}>Đội B thắng {rules.target}</button>
+          </div>
+          {tie && <p className={`${T3} text-rose-300`}>Tỉ số không được hoà.</p>}
+          {offRule && <p className={`${T4} text-amber-300`}>Tỉ số chưa đúng luật {rules.target} điểm cách {rules.winBy}. Vẫn lưu được nếu trận rút ngắn.</p>}
+          <div className="grid grid-cols-[auto_1fr] gap-2">
+            <button type="button" className={BTN_GHOST} onClick={() => setUi({ quickMatch: null })}>Bỏ chọn</button>
+            <button type="button" onClick={() => void submit()} disabled={!filled || tie || busy} className={BTN_PRIMARY}>
+              <CheckCircle2 className="h-4 w-4" /> {busy ? 'Đang lưu…' : 'Xác nhận kết quả'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className={`${T3} px-1 text-slate-400`}>Chạm một trận để nhập tỉ số chung cuộc (dùng cho sân không có trọng tài bàn).</p>
+      )}
+
+      <StripGroup title="Chưa có kết quả" right={<span className={`${T4} text-slate-500`}>{pending.length} trận</span>}>
+        {pending.map(row)}
+        {!pending.length && <p className={`${T3} p-6 text-center text-slate-500`}>Tất cả trận đã có kết quả.</p>}
+      </StripGroup>
+      {recent.length > 0 && (
+        <StripGroup title="Vừa nhập · chạm để sửa">{recent.map(row)}</StripGroup>
+      )}
     </div>
   );
 }
@@ -325,59 +304,51 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
 export default function ScorekeeperView({ vm, auth, ui, setUi, toast }: { vm: TournamentVM; auth: AuthState; ui: UIState; setUi: (p: Partial<UIState>) => void; toast: Toast }) {
   if (!auth.isStaff) {
     return (
-      <EmptyState icon={Lock} title="Dành cho trọng tài / BTC">
-        <p>Đăng nhập bằng tài khoản Google đã được cấp quyền Trọng tài hoặc Ban tổ chức để nhập điểm.</p>
-        {!auth.session && (
-          <button type="button" onClick={() => void auth.signInWithGoogle()} className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-[#0B0F17]">
-            Đăng nhập Google <ChevronRight className="h-4 w-4" />
-          </button>
-        )}
-      </EmptyState>
+      <Empty>
+        <Lock className="mx-auto mb-2 h-6 w-6 text-slate-500" />
+        Dành cho Trọng tài / BTC. Đăng nhập bằng Gmail đã được cấp quyền để nhập điểm.
+      </Empty>
     );
   }
 
-  const activeCourt = ui.activeCourt ?? vm.courts[0]?.name ?? null;
+  const activeCourt = ui.activeCourt && vm.courts.some((c) => c.name === ui.activeCourt) ? ui.activeCourt : vm.courts[0]?.name ?? null;
+  const locked = vm.locked;
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#06B6D4]">Trọng tài / Ban tổ chức</p>
-        <h2 className="pm-display text-3xl font-extrabold uppercase leading-none text-white">Nhập điểm</h2>
-      </div>
-      <Segmented
-        full
-        value={ui.scoreMode}
-        onChange={(v) => setUi({ scoreMode: v })}
-        options={[{ id: 'live' as const, label: 'Nhập từng quả', icon: Activity }, { id: 'quick' as const, label: 'Kết quả nhanh', icon: ClipboardEdit }]}
-      />
-      {vm.locked && (
-        <div role="status" className="flex items-start gap-3 rounded-2xl border border-[#F59E0B]/60 bg-[#F59E0B]/10 px-4 py-3">
-          <Crown className="mt-0.5 h-5 w-5 shrink-0 text-[#F59E0B]" />
+      {locked && (
+        <div role="status" className="flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
           <div>
-            <p className="pm-display text-lg font-bold uppercase text-[#F59E0B]">Giải đấu đã kết thúc. Không thể thay đổi kết quả.</p>
-            <p className="text-xs text-amber-200/80">Mọi nút nhập điểm đã bị khoá. Liên hệ Admin nếu cần mở lại giải.</p>
+            <p className={`${T2} text-amber-200`}>Giải đấu đã kết thúc. Không thể thay đổi kết quả.</p>
+            <p className={`${T3} text-slate-400`}>Mọi nút nhập điểm đã bị khoá. Liên hệ Admin nếu cần mở lại giải.</p>
           </div>
         </div>
       )}
-      {ui.scoreMode === 'live' ? (
-        <>
+
+      <div className="flex flex-wrap gap-2">
+        <Segmented label="Cách nhập điểm" value={ui.scoreMode} onChange={(v) => setUi({ scoreMode: v })}
+          options={[{ id: 'live' as const, label: 'Từng quả', icon: Activity }, { id: 'quick' as const, label: 'Kết quả nhanh', icon: ClipboardEdit }]} />
+        {ui.scoreMode === 'live' && vm.courts.length > 1 && (
           <div className="lg:hidden">
-            <Segmented full size="sm" value={activeCourt ?? ''} onChange={(v) => setUi({ activeCourt: v })} options={vm.courts.map((c) => ({ id: c.name, label: c.name }))} />
+            <Segmented label="Sân" value={activeCourt ?? ''} onChange={(v) => setUi({ activeCourt: v })}
+              options={vm.courts.map((c) => ({ id: c.name, label: c.name }))} />
           </div>
-          {/* A disabled fieldset locks every button and input inside when the tournament is closed */}
-          <fieldset disabled={vm.locked} className={`m-0 min-w-0 border-0 p-0 ${vm.locked ? 'pointer-events-none opacity-50 grayscale' : ''}`} aria-disabled={vm.locked}>
-            <div className="grid gap-6 lg:grid-cols-2">
-              {vm.courts.map((c) => (
-                <ScorePad key={`${c.name}-${c.matchId}`} court={c} vm={vm} hiddenOnMobile={c.name !== activeCourt} toast={toast} />
-              ))}
-            </div>
-          </fieldset>
-        </>
-      ) : (
-        <fieldset disabled={vm.locked} className={`m-0 min-w-0 border-0 p-0 ${vm.locked ? 'pointer-events-none opacity-50 grayscale' : ''}`} aria-disabled={vm.locked}>
+        )}
+      </div>
+
+      {/* A disabled fieldset locks every button and input inside when the tournament is closed */}
+      <fieldset disabled={locked} aria-disabled={locked} className={`m-0 min-w-0 border-0 p-0 ${locked ? 'opacity-50' : ''}`}>
+        {ui.scoreMode === 'live' ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {vm.courts.map((c) => (
+              <ScorePad key={`${c.name}-${c.matchId}`} court={c} vm={vm} hiddenOnMobile={c.name !== activeCourt} toast={toast} />
+            ))}
+          </div>
+        ) : (
           <QuickEntry vm={vm} ui={ui} setUi={setUi} toast={toast} />
-        </fieldset>
-      )}
+        )}
+      </fieldset>
     </div>
   );
 }

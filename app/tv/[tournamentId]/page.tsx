@@ -30,7 +30,7 @@ export default function TVPage({ params, searchParams }: { params: { tournamentI
 
   if (!vm) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#0B0F17] pm-display text-2xl font-bold uppercase text-slate-500">
+      <div className="flex h-screen items-center justify-center bg-slate-950 text-lg font-bold text-slate-500">
         {status === 'error' ? `Lỗi tải dữ liệu: ${error}` : 'Đang tải màn hình TV…'}
       </div>
     );
@@ -39,7 +39,7 @@ export default function TVPage({ params, searchParams }: { params: { tournamentI
     <>
       <TVBroadcastView vm={vm} ui={ui} setUi={setUi} standalone />
       {!connected && (
-        <div className="fixed left-3 top-3 rounded bg-red-600/90 px-2 py-1 text-xs font-bold text-white">Mất kết nối realtime · đang thử lại</div>
+        <div className="fixed left-3 top-3 rounded-md bg-rose-600/90 px-2 py-1 text-[10px] font-medium tracking-wide text-white">Mất kết nối realtime · đang thử lại</div>
       )}
     </>
   );
