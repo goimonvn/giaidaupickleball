@@ -24,7 +24,10 @@ export const SURFACE = 'rounded-xl border border-white/5 bg-slate-950';
 export const BTN_PRIMARY = `inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 ${T2} text-slate-950 transition hover:bg-white disabled:opacity-40`;
 export const BTN_GHOST = `inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-white/10 px-4 ${T2} text-slate-200 transition hover:bg-white/5 disabled:opacity-40`;
 export const BTN_DANGER = `inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-rose-500/40 px-4 ${T2} text-rose-300 transition hover:bg-rose-500/10 disabled:opacity-40`;
-export const INPUT = `min-h-[44px] w-full rounded-xl border border-white/10 bg-slate-950 px-3 ${T3} text-slate-100 placeholder:text-slate-600 focus:border-white/30 focus:outline-none disabled:opacity-50`;
+// Fixed height + min-w-0: iOS Safari ignores min-height on date/select and gives them an intrinsic min width
+export const INPUT = `block h-11 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-slate-950 px-3 ${T3} text-slate-100 placeholder:text-slate-600 focus:border-white/30 focus:outline-none disabled:opacity-50`;
+/** Date / time inputs: strip the native iOS styling so the value is left-aligned and stays inside the box */
+export const DATE_INPUT = `${INPUT} appearance-none text-left [&::-webkit-date-and-time-value]:text-left [&::-webkit-date-and-time-value]:leading-[2.5rem]`;
 export const ICON_BTN = 'flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/5 hover:text-white disabled:opacity-25';
 
 export type Toast = (msg: string, kind?: 'ok' | 'error') => void;
@@ -145,7 +148,7 @@ export function Checkbox({ on }: { on: boolean }) {
 
 export function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1">
       {htmlFor ? <label htmlFor={htmlFor} className={`${T4} text-slate-500`}>{label}</label> : <span className={`${T4} text-slate-500`}>{label}</span>}
       {children}
     </div>

@@ -180,27 +180,31 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
 }
 
 /* ======================= Quick final score entry ======================= */
+/** Score input for one team: − [score] + on the first row, "ĐỘI A · player / player" on the row below. */
 function Stepper({ id, label, sub, value, onChange }: { id: string; label: string; sub: string; value: string; onChange: (v: string) => void }) {
   const n = parseInt(value, 10);
   const set = (v: number) => onChange(String(Math.max(0, Math.min(99, v))));
   return (
-    <div className={`flex items-center gap-2 ${SURFACE} p-3`}>
-      <div className="min-w-0 flex-1">
-        <label htmlFor={id} className={`${T4} text-slate-500`}>{label}</label>
-        <p className={`${T3} truncate text-slate-100`}>{sub}</p>
+    <div className={`${SURFACE} flex flex-col gap-2 p-3`}>
+      <div className="flex items-center gap-2">
+        <button type="button" aria-label={`Giảm điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) - 1)} className={`${BTN_GHOST} w-12 shrink-0 px-0`}><Minus className="h-4 w-4" /></button>
+        <input
+          id={id}
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={value}
+          placeholder="0"
+          aria-describedby={`${id}-team`}
+          onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+          onFocus={(e) => e.target.select()}
+          className={`${INPUT} pm-num flex-1 text-center ${T2}`}
+        />
+        <button type="button" aria-label={`Tăng điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) + 1)} className={`${BTN_GHOST} w-12 shrink-0 px-0`}><Plus className="h-4 w-4" /></button>
       </div>
-      <button type="button" aria-label={`Giảm điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) - 1)} className={`${BTN_GHOST} w-11 px-0`}><Minus className="h-4 w-4" /></button>
-      <input
-        id={id}
-        inputMode="numeric"
-        pattern="[0-9]*"
-        value={value}
-        placeholder="0"
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
-        onFocus={(e) => e.target.select()}
-        className={`${INPUT} pm-num w-14 text-center ${T2}`}
-      />
-      <button type="button" aria-label={`Tăng điểm ${label}`} onClick={() => set((Number.isNaN(n) ? 0 : n) + 1)} className={`${BTN_GHOST} w-11 px-0`}><Plus className="h-4 w-4" /></button>
+      <label id={`${id}-team`} htmlFor={id} className="flex min-w-0 items-baseline gap-1.5">
+        <span className={`${T4} shrink-0 text-slate-500`}>{label}</span>
+        <span className={`${T3} truncate text-slate-100`}>{sub}</span>
+      </label>
     </div>
   );
 }

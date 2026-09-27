@@ -4,12 +4,12 @@ import { CalendarDays, Lock, LockOpen, Pencil, Plus, Radio, Trash2, Trophy } fro
 import { useState } from 'react';
 import { completeTournament, createTournament, deleteTournament, reopenTournament, updateTournament } from '@/lib/actions';
 import { refreshTournament } from '@/lib/client-actions';
-import { DEFAULT_RULES, dateInputOf, fmtDateVN, STATUS_TAG, statusTagOf, withDefaults } from '@/lib/engine';
+import { DEFAULT_RULES, dateInputOf, fmtDateVN, startsAtOf, STATUS_TAG, statusTagOf, timeInputOf, withDefaults } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
 import type { EventInput, RulesConfig, TournamentInput, TournamentRow, TournamentStatusTag } from '@/lib/types';
 import { EVENT_PRESETS } from './AdminDashboard';
 import {
-  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, Empty, Field, INPUT, Segmented, Sheet, T1, T2, T3, T4, type Toast,
+  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, DATE_INPUT, Empty, Field, INPUT, Segmented, Sheet, T1, T2, T3, T4, type Toast,
 } from './kit';
 
 /* =====================================================================
@@ -22,6 +22,8 @@ const inputOf = (t: TournamentRow): TournamentInput => {
   return {
     title: t.title,
     date: dateInputOf(t.starts_at),
+    time: timeInputOf(t.starts_at),
+    startsAt: t.starts_at,
     venue: t.venue ?? '',
     courts: Math.max(1, Math.min(4, r.courts.length || 2)),
     target: r.target,
@@ -34,7 +36,7 @@ const today = () => dateInputOf(new Date().toISOString());
 
 function TournamentForm({ initial, onSave, onClose }: { initial: TournamentRow | null; onSave: (f: TournamentInput, events: EventInput[]) => Promise<boolean>; onClose: () => void }) {
   const [f, setF] = useState<TournamentInput>(() => (initial ? inputOf(initial) : {
-    title: '', date: today(), venue: '', courts: 2, target: DEFAULT_RULES.target, winBy: DEFAULT_RULES.winBy, tieBreakers: DEFAULT_RULES.tieBreakers,
+    title: '', date: today(), time: '08:00', startsAt: null, venue: '', courts: 2, target: DEFAULT_RULES.target, winBy: DEFAULT_RULES.winBy, tieBreakers: DEFAULT_RULES.tieBreakers,
   }));
   const [events, setEvents] = useState<string[]>(['Đôi Nam']);
   const [busy, setBusy] = useState(false);
@@ -48,7 +50,7 @@ function TournamentForm({ initial, onSave, onClose }: { initial: TournamentRow |
           e.preventDefault();
           if (!valid) return;
           setBusy(true);
-          const ok = await onSave(f, EVENT_PRESETS.filter((p) => events.includes(p.name)));
+          const ok = await onSave({ ...f, startsAt: startsAtOf(f.date, f.time) }, EVENT_PRESETS.filter((p) => events.includes(p.name)));
           setBusy(false);
           if (ok) onClose();
         }}
@@ -57,9 +59,10 @@ function TournamentForm({ initial, onSave, onClose }: { initial: TournamentRow |
           <input id="pm-tm-title" autoFocus className={INPUT} value={f.title} maxLength={120} placeholder="VD: Giải Tất Niên 2026" onChange={(e) => setF({ ...f, title: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="NGÀY" htmlFor="pm-tm-date"><input id="pm-tm-date" type="date" className={INPUT} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
-          <Field label="ĐỊA ĐIỂM" htmlFor="pm-tm-venue"><input id="pm-tm-venue" className={INPUT} value={f.venue} placeholder="Sân…" onChange={(e) => setF({ ...f, venue: e.target.value })} /></Field>
+          <Field label="NGÀY THI ĐẤU" htmlFor="pm-tm-date"><input id="pm-tm-date" type="date" className={DATE_INPUT} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+          <Field label="GIỜ BẮT ĐẦU" htmlFor="pm-tm-time"><input id="pm-tm-time" type="time" step={300} className={DATE_INPUT} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></Field>
         </div>
+        <Field label="ĐỊA ĐIỂM" htmlFor="pm-tm-venue"><input id="pm-tm-venue" className={INPUT} value={f.venue} placeholder="Sân…" onChange={(e) => setF({ ...f, venue: e.target.value })} /></Field>
         <Field label="SỐ LƯỢNG SÂN">
           <Segmented full value={f.courts} onChange={(v) => setF({ ...f, courts: v })} options={[1, 2, 3, 4].map((n) => ({ id: n, label: `${n} sân` }))} />
         </Field>
@@ -173,7 +176,7 @@ export default function TournamentManager({
                     <span className={`${T4} rounded-md px-1.5 py-0.5 ${tag.cls}`}>{tag.label}</span>
                     {isActive && <span className={`${T4} rounded-md bg-white/10 px-1.5 py-0.5 text-slate-200`}>Đang mở</span>}
                   </div>
-                  <p className={`${T3} mt-0.5 text-slate-400`}>{fmtDateVN(t.starts_at)} · {courts} sân{t.venue ? ` · ${t.venue}` : ''}</p>
+                  <p className={`${T3} mt-0.5 text-slate-400`}>{fmtDateVN(t.starts_at)}{t.starts_at ? ` · ${timeInputOf(t.starts_at)}` : ''} · {courts} sân{t.venue ? ` · ${t.venue}` : ''}</p>
                 </div>
               </div>
 

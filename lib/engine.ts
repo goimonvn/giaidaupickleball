@@ -555,8 +555,19 @@ export const dateInputOf = (iso: string | null) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-/** yyyy-mm-dd → ISO at 08:00 local time (default first-match time) */
-export const startsAtOf = (date: string) => (date ? new Date(`${date}T08:00:00`).toISOString() : null);
+/** ISO timestamp → HH:mm in local time (for <input type="time">) */
+export const timeInputOf = (iso: string | null) => {
+  if (!iso) return '08:00';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** yyyy-mm-dd + HH:mm (local, browser) → ISO. Call in the browser, never on the server (UTC). */
+export const startsAtOf = (date: string, time = '08:00') => {
+  if (!date) return null;
+  const d = new Date(`${date}T${/^\d{2}:\d{2}$/.test(time) ? time : '08:00'}:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
 
 export const fmtDateVN = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Chưa đặt ngày';

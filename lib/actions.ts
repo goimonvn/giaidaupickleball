@@ -8,7 +8,7 @@
    throwing, because Next.js hides thrown error messages in production.
    Latency-sensitive scoring stays client-side in lib/client-actions.ts.
    ===================================================================== */
-import { courtNames, DEFAULT_RULES, friendlyError, startsAtOf } from './engine';
+import { courtNames, DEFAULT_RULES, friendlyError } from './engine';
 import { createSupabaseServer } from './supabase/server';
 import type {
   ActionResult, AppRole, EventInput, Member, MemberInput, RulesConfig, StaffRole, TieBreaker, TournamentInput, UserRoleRow,
@@ -176,13 +176,13 @@ function cleanTournament(input: TournamentInput): { error: string } | { title: s
   if (![11, 15, 21].includes(input.target)) return { error: 'Điểm thắng game chỉ nhận 11, 15 hoặc 21.' };
   if (![1, 2].includes(input.winBy)) return { error: 'Cách biệt tối thiểu là 1 hoặc 2 điểm.' };
   if (!Number.isInteger(input.courts) || input.courts < 1 || input.courts > 4) return { error: 'Số sân từ 1 đến 4.' };
-  if (input.date && !/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { error: 'Ngày thi đấu không hợp lệ.' };
+  if (input.startsAt && Number.isNaN(Date.parse(input.startsAt))) return { error: 'Thời gian tổ chức không hợp lệ.' };
   const tieBreakers = input.tieBreakers.filter((k) => TB_KEYS.includes(k));
   if (tieBreakers.length !== TB_KEYS.length || new Set(tieBreakers).size !== TB_KEYS.length) return { error: 'Thứ tự ưu tiên xếp hạng không hợp lệ.' };
   return {
     title,
     venue: input.venue.trim() || null,
-    starts_at: startsAtOf(input.date),
+    starts_at: input.startsAt ? new Date(input.startsAt).toISOString() : null,
     rules: { target: input.target, winBy: input.winBy, tieBreakers, courts: courtNames(input.courts) },
   };
 }

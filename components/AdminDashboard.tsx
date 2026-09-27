@@ -11,7 +11,7 @@ import {
 } from '@/lib/actions';
 import { applyEventSetup, assignCourtReferee, callNextMatch, createKnockout, refreshTournament } from '@/lib/client-actions';
 import {
-  dateInputOf, GROUP_LETTERS, groupsOfEvent, pairAB, pairBalanced, pairSpread, pairSum, qualifiersOf, snakeByIndex,
+  dateInputOf, GROUP_LETTERS, startsAtOf, timeInputOf, groupsOfEvent, pairAB, pairBalanced, pairSpread, pairSum, qualifiersOf, snakeByIndex,
   STATUS_TAG, stageName, stageType, statusTagOf, TB_LABELS, teamName, type DraftTeam,
 } from '@/lib/engine';
 import { useStandingsEngine, type AuthState } from '@/lib/supabase';
@@ -19,7 +19,7 @@ import type {
   BtcDraft, EventInput, EventVM, PairingMode, PlayerRow, TieBreaker, TournamentInput, TournamentVM, UIState,
 } from '@/lib/types';
 import {
-  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, Checkbox, chipCls, Confirm, Empty, Field, ICON_BTN, INPUT, LiveBadge,
+  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, Checkbox, chipCls, Confirm, DATE_INPUT, Empty, Field, ICON_BTN, INPUT, LiveBadge,
   optionCls, Segmented, Sheet, StripGroup, SURFACE, T1, T2, T3, T4, Toggle, type Toast,
 } from './kit';
 import { Bracket, MatchDrawer, ScoreStrip } from './PublicView';
@@ -113,6 +113,8 @@ export function TieBreakerOrder({ order, onChange, disabled }: { order: TieBreak
 const inputOf = (vm: TournamentVM): TournamentInput => ({
   title: vm.tournament.title,
   date: dateInputOf(vm.tournament.starts_at),
+  time: timeInputOf(vm.tournament.starts_at),
+  startsAt: vm.tournament.starts_at,
   venue: vm.tournament.venue ?? '',
   courts: Math.max(1, Math.min(4, vm.rules.courts.length)),
   target: vm.rules.target,
@@ -185,7 +187,7 @@ function Step1({ vm, toast, onDone }: { vm: TournamentVM; toast: Toast; onDone: 
   const save = async () => {
     setBusy(true);
     const ok = await run(async () => {
-      const r = await unwrap(updateTournament(tid, cfg));
+      const r = await unwrap(updateTournament(tid, { ...cfg, startsAt: startsAtOf(cfg.date, cfg.time) }));
       await refreshTournament(tid);
       toast(r.requeued ? `Đã lưu cấu hình. ${r.requeued} trận ở sân bị bỏ đã về hàng chờ.` : 'Đã lưu cấu hình giải');
     }, toast);
@@ -202,18 +204,18 @@ function Step1({ vm, toast, onDone }: { vm: TournamentVM; toast: Toast; onDone: 
 
   return (
     <fieldset disabled={vm.locked} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="TÊN GIẢI" htmlFor="pm-cfg-title"><input id="pm-cfg-title" className={INPUT} value={cfg.title} maxLength={120} onChange={(e) => setCfg({ ...cfg, title: e.target.value })} /></Field>
-        <Field label="NGÀY THI ĐẤU" htmlFor="pm-cfg-date"><input id="pm-cfg-date" type="date" className={INPUT} value={cfg.date} onChange={(e) => setCfg({ ...cfg, date: e.target.value })} /></Field>
+      <Field label="TÊN GIẢI" htmlFor="pm-cfg-title"><input id="pm-cfg-title" className={INPUT} value={cfg.title} maxLength={120} onChange={(e) => setCfg({ ...cfg, title: e.target.value })} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="NGÀY THI ĐẤU" htmlFor="pm-cfg-date"><input id="pm-cfg-date" type="date" className={DATE_INPUT} value={cfg.date} onChange={(e) => setCfg({ ...cfg, date: e.target.value })} /></Field>
+        <Field label="GIỜ BẮT ĐẦU" htmlFor="pm-cfg-time"><input id="pm-cfg-time" type="time" step={300} className={DATE_INPUT} value={cfg.time} onChange={(e) => setCfg({ ...cfg, time: e.target.value })} /></Field>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="ĐỊA ĐIỂM" htmlFor="pm-cfg-venue"><input id="pm-cfg-venue" className={INPUT} value={cfg.venue} placeholder="CLB, sân…" onChange={(e) => setCfg({ ...cfg, venue: e.target.value })} /></Field>
-        <Field label="SỐ LƯỢNG SÂN" htmlFor="pm-cfg-courts">
-          <select id="pm-cfg-courts" className={INPUT} value={cfg.courts} onChange={(e) => setCfg({ ...cfg, courts: Number(e.target.value) })}>
-            {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} sân</option>)}
-          </select>
-        </Field>
-      </div>
+      <p className={`${T4} -mt-2 text-slate-500`}>Lịch vòng bảng xếp giờ từ thời điểm này khi bấm "Áp dụng & tạo lịch" ở Bước 2.</p>
+      <Field label="ĐỊA ĐIỂM" htmlFor="pm-cfg-venue"><input id="pm-cfg-venue" className={INPUT} value={cfg.venue} placeholder="CLB, sân…" onChange={(e) => setCfg({ ...cfg, venue: e.target.value })} /></Field>
+      <Field label="SỐ LƯỢNG SÂN">
+        <div className="grid grid-cols-4 gap-1.5">
+          {[1, 2, 3, 4].map((n) => <button key={n} type="button" aria-pressed={cfg.courts === n} onClick={() => setCfg({ ...cfg, courts: n })} className={optionCls(cfg.courts === n)}>{n} sân</button>)}
+        </div>
+      </Field>
       {liveOnRemoved > 0 && <p className={`${T4} -mt-2 text-amber-300`}>{liveOnRemoved} trận đang đấu ở sân bị bỏ sẽ được đưa về hàng chờ.</p>}
 
       <div className="grid gap-3 sm:grid-cols-2">

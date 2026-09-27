@@ -32,3 +32,7 @@ html, body { background: #020617; }
 @keyframes pm-up { from { transform: translateY(12px); opacity: 0 } to { transform: none; opacity: 1 } }
 .pm-sheet { animation: pm-up .22s ease-out; }
 @media (prefers-reduced-motion: reduce) { .pm-marquee, .pm-pulse, .pm-pop, .pm-sheet { animation: none !important } }
+
+/* iOS Safari: native date/time inputs get an intrinsic min width and centred text — keep them inside their box */
+.pm-root input[type=date], .pm-root input[type=time] { -webkit-appearance: none; appearance: none; min-width: 0; }
+.pm-root input::-webkit-date-and-time-value { text-align: left; }

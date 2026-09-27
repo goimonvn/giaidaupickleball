@@ -301,8 +301,12 @@ export interface BtcDraft {
 /** Dữ liệu form Tạo / Sửa giải (Quản lý giải đấu & Bước 1) */
 export interface TournamentInput {
   title: string;
-  /** yyyy-mm-dd */
+  /** yyyy-mm-dd (form field, local time) */
   date: string;
+  /** HH:mm — giờ bắt đầu (form field, local time) */
+  time: string;
+  /** Computed in the browser from date + time so the server never guesses the timezone */
+  startsAt: string | null;
   venue: string;
   courts: number;
   target: number;

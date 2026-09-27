@@ -12,13 +12,13 @@ import { useScrollDirection } from '@/hooks/useScrollDirection';
 import { fmtDateVN, STATUS_TAG, statusTagOf } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
 import type { AppScreen, PublicTab, TournamentRow } from '@/lib/types';
-import { Segmented, T2, T3, T4 } from './kit';
+import { T2, T3, T4 } from './kit';
 
 /* =====================================================================
    Header + navigation (approved v4 demo)
    · Header: tournament selector · 📺 TV (/tv/[id]) · avatar menu
    · Staff: Facebook-style bottom nav (icon + label, 52px), no TV / Giải đấu tabs
-   · Guests: no bottom nav — 3 segmented tabs under the header instead
+   · Guests: the same auto-hiding bottom nav with the 3 public tabs
    · Header and bottom nav hide on scroll down, show on scroll up (15px threshold)
    ===================================================================== */
 
@@ -38,10 +38,16 @@ export const PUBLIC_TABS: NavItem<PublicTab>[] = [
 const BTC_TAB: NavItem = { id: 'btc', label: 'BTC', icon: Wrench };
 const REFEREE_TAB: NavItem = { id: 'referee', label: 'Trọng Tài', icon: Smartphone };
 
-/** Bottom-nav tabs for a role. Guests get none (they use the top tabs). */
+/**
+ * Bottom-nav tabs for a role (auto-hiding, same bar for everyone):
+ *   Khách:     Trận Đấu · Xếp Hạng · Vinh Danh
+ *   Trọng tài: Trận Đấu · Xếp Hạng · Vinh Danh · Trọng Tài
+ *   BTC/Admin: Trận Đấu · Xếp Hạng · BTC · Trọng Tài   (no Vinh Danh)
+ */
 export function navItemsFor(auth: Pick<AuthState, 'isStaff' | 'isOrganizer'>): NavItem[] {
-  if (!auth.isStaff) return [];
-  return [...PUBLIC_TABS, ...(auth.isOrganizer ? [BTC_TAB] : []), REFEREE_TAB];
+  if (auth.isOrganizer) return [...PUBLIC_TABS.filter((t) => t.id !== 'podium'), BTC_TAB, REFEREE_TAB];
+  if (auth.isStaff) return [...PUBLIC_TABS, REFEREE_TAB];
+  return PUBLIC_TABS;
 }
 
 const ROLE_TAG = { viewer: 'KHÁCH', scorekeeper: 'TRỌNG TÀI', organizer: 'BTC', admin: 'ADMIN' } as const;
@@ -76,8 +82,8 @@ function TournamentSelector({
         <span className="min-w-0 flex-1">
           <span className={`${T2} block truncate text-white`}>{current?.title ?? 'PickleMasters Live'}</span>
           <span className={`${T4} flex items-center gap-1.5 text-slate-500`}>
-            {tag && <span className={`rounded px-1 ${tag.cls}`}>{tag.label}</span>}
-            {!connected ? <span>Đang kết nối…</span> : liveCount > 0 && <span className="text-[#84CC16]">● {liveCount} sân live</span>}
+            {tag && <span className={`whitespace-nowrap rounded px-1 ${tag.cls}`}>{tag.label}</span>}
+            {!connected ? <span className="whitespace-nowrap">Đang kết nối…</span> : liveCount > 0 && <span className="whitespace-nowrap text-[#84CC16]">● {liveCount} sân live</span>}
           </span>
         </span>
         {tournaments.length > 1 && <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition ${open ? 'rotate-180' : ''}`} />}
@@ -275,7 +281,6 @@ export default function Navbar({
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useScrollDirection({ threshold: 15, disabled: menuOpen });
-  const staff = auth.isStaff;
   const items = navItemsFor(auth);
 
   const go = (s: AppScreen) => {
@@ -283,7 +288,6 @@ export default function Navbar({
     else router.push(s === 'matches' ? '/' : `/?screen=${s}`);
   };
   const openProfile = onOpenProfile ?? (() => router.push('/?screen=matches&profile=1'));
-  const guestTab: PublicTab = screen === 'table' || screen === 'podium' ? screen : 'matches';
 
   return (
     <>
@@ -345,15 +349,9 @@ export default function Navbar({
           )}
         </div>
 
-        {/* Guests: no bottom nav — 3 segmented tabs live in the (auto-hiding) header */}
-        {!staff && !auth.loading && screen && (
-          <div className="mx-auto max-w-3xl px-4 pb-2">
-            <Segmented full label="Mục xem" value={guestTab} onChange={(v) => go(v)} options={PUBLIC_TABS.map((t) => ({ id: t.id, label: t.short ?? t.label, icon: t.icon }))} />
-          </div>
-        )}
       </header>
 
-      {staff && screen && items.length > 0 && <BottomNav items={items} active={screen} hidden={hidden} onGo={go} />}
+      {screen && !auth.loading && <BottomNav items={items} active={screen} hidden={hidden} onGo={go} />}
     </>
   );
 }

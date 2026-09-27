@@ -33,8 +33,10 @@ const ROLE_LABEL = { viewer: 'Khách', scorekeeper: 'Trọng Tài', organizer: '
 const safeGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
-/** Guests only see the public tabs; scorekeepers add Trọng Tài; organizers see everything. */
+/** Guests only see the public tabs; scorekeepers add Trọng Tài; organizers get BTC + Trọng Tài but no Vinh Danh. */
 function allowedScreen(s: AppScreen, auth: Pick<AuthState, 'isStaff' | 'isOrganizer'>): AppScreen {
+  // BTC/Admin have no Vinh Danh tab
+  if (s === 'podium') return auth.isOrganizer ? 'matches' : s;
   if (PUBLIC.includes(s as PublicTab)) return s;
   if (s === 'referee') return auth.isStaff ? s : 'matches';
   return auth.isOrganizer ? s : 'matches';
@@ -233,14 +235,14 @@ export default function Home() {
         setDemo={setDemo}
       />
 
-      <main className={`mx-auto max-w-3xl px-4 pt-4 ${staff ? 'pb-24' : 'pb-10'}`}>{content}</main>
+      <main className="mx-auto max-w-3xl px-4 pb-24 pt-4">{content}</main>
 
       {profileOpen && auth.session && <ProfileSheet auth={auth} tournaments={tournaments.length} onClose={() => setProfileOpen(false)} />}
 
       {toastMsg && (
         <div
           role="status"
-          className={`fixed inset-x-4 ${staff ? 'bottom-20' : 'bottom-6'} z-[80] mx-auto flex max-w-sm items-center gap-2 rounded-xl border bg-slate-900 px-4 py-3 ${T3} text-white shadow-2xl ${toastMsg.kind === 'error' ? 'border-rose-500/40' : 'border-white/10'}`}
+          className={`fixed inset-x-4 bottom-20 z-[80] mx-auto flex max-w-sm items-center gap-2 rounded-xl border bg-slate-900 px-4 py-3 ${T3} text-white shadow-2xl ${toastMsg.kind === 'error' ? 'border-rose-500/40' : 'border-white/10'}`}
         >
           {toastMsg.kind === 'error' ? <X className="h-4 w-4 shrink-0 text-rose-300" /> : <Check className="h-4 w-4 shrink-0 text-slate-300" />}
           {toastMsg.msg}
