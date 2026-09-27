@@ -25,12 +25,18 @@ export interface RulesConfig {
   courts: string[];
   /** Trọng tài theo sân (tên hiển thị công khai, không lưu email). DB tự gán cho trận khi lên sân. */
   referees?: Record<string, string>;
+  /** Tự tạo Bán kết khi xong vòng bảng, Chung kết khi xong Bán kết (mặc định bật) */
+  autoKnockout?: boolean;
+  /** Có đá Tranh hạng 3 không. Tắt: 2 đội thua Bán kết đồng hạng 3 (mặc định bật) */
+  bronzeMatch?: boolean;
 }
 
 export interface GroupConfig {
   groupsEnabled: boolean;
   numGroups: number;
   advance: number;
+  /** BTC bấm "Huỷ lịch vừa tạo": tạm tắt tự động tạo vòng loại cho nội dung này */
+  autoOff?: boolean;
 }
 
 export interface ServerSnapshot {
@@ -241,6 +247,8 @@ export interface StandingRow {
   diff: number;
   pts: number;
   live: boolean;
+  /** Bằng đội xếp ngay trên ở MỌI tiêu chí ưu tiên — thứ tự giữa 2 đội này chưa phân định được */
+  tiedWithPrev: boolean;
 }
 
 export interface PodiumEntry {
@@ -312,6 +320,10 @@ export interface TournamentInput {
   target: number;
   winBy: number;
   tieBreakers: TieBreaker[];
+  /** Tự động tạo vòng loại trực tiếp */
+  autoKnockout: boolean;
+  /** Tổ chức trận Tranh hạng 3 */
+  bronzeMatch: boolean;
 }
 
 export interface EventInput {

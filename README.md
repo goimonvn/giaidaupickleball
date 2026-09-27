@@ -95,6 +95,16 @@ Chạy thêm migration `supabase/migrations/20260928000000_referee_tournament_ma
 
 Import repo vào Vercel, thêm các biến `NEXT_PUBLIC_*` như trong `.env.local`, đặt `NEXT_PUBLIC_SITE_URL` bằng domain Vercel và thêm `https://<domain>/auth/callback` vào Redirect URLs của Supabase.
 
+### 5c. Bản 1.3 (tự động vòng loại trực tiếp)
+
+Chạy thêm migration `supabase/migrations/20260929000000_auto_knockout.sql`. Sau đó:
+
+- Vòng bảng của một nội dung xong → app tự tạo lịch Bán kết (hoặc Chung kết nếu chỉ 2 đội đi tiếp) và đưa trận lên sân trống.
+- 2 trận Bán kết xong → database tự tạo Chung kết (và Tranh hạng 3 nếu bật).
+- Nếu các đội bằng nhau ở mọi tiêu chí ưu tiên, app không tự tạo mà báo BTC quyết định ở Bước 3.
+- BTC có thể **Huỷ lịch vừa tạo** khi các trận đó chưa đấu (tự động tạm dừng cho nội dung đó, bấm **Bật lại** để tiếp tục).
+- Bước 1 có 2 công tắc: **Tự động tạo Bán kết & Chung kết** và **Tổ chức trận Tranh hạng 3**. Tắt Tranh hạng 3 thì 2 đội thua Bán kết đồng hạng 3.
+
 ## Phân quyền
 
 | Vai trò | Xem giải / TV | Nhập điểm | Tạo giải, ghép cặp, chia bảng, thành viên, đóng giải | Phân quyền, mở lại giải |

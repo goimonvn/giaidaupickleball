@@ -9,7 +9,7 @@ import type { AuthState } from '@/lib/supabase';
 import type { EventInput, RulesConfig, TournamentInput, TournamentRow, TournamentStatusTag } from '@/lib/types';
 import { EVENT_PRESETS } from './AdminDashboard';
 import {
-  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, DATE_INPUT, Empty, Field, INPUT, Segmented, Sheet, T1, T2, T3, T4, type Toast,
+  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, DATE_INPUT, Empty, Field, INPUT, Segmented, Sheet, T1, T2, T3, T4, Toggle, type Toast,
 } from './kit';
 
 /* =====================================================================
@@ -29,6 +29,8 @@ const inputOf = (t: TournamentRow): TournamentInput => {
     target: r.target,
     winBy: r.winBy,
     tieBreakers: r.tieBreakers,
+    autoKnockout: r.autoKnockout !== false,
+    bronzeMatch: r.bronzeMatch !== false,
   };
 };
 
@@ -36,7 +38,7 @@ const today = () => dateInputOf(new Date().toISOString());
 
 function TournamentForm({ initial, onSave, onClose }: { initial: TournamentRow | null; onSave: (f: TournamentInput, events: EventInput[]) => Promise<boolean>; onClose: () => void }) {
   const [f, setF] = useState<TournamentInput>(() => (initial ? inputOf(initial) : {
-    title: '', date: today(), time: '08:00', startsAt: null, venue: '', courts: 2, target: DEFAULT_RULES.target, winBy: DEFAULT_RULES.winBy, tieBreakers: DEFAULT_RULES.tieBreakers,
+    title: '', date: today(), time: '08:00', startsAt: null, venue: '', courts: 2, target: DEFAULT_RULES.target, winBy: DEFAULT_RULES.winBy, tieBreakers: DEFAULT_RULES.tieBreakers, autoKnockout: true, bronzeMatch: true,
   }));
   const [events, setEvents] = useState<string[]>(['Đôi Nam']);
   const [busy, setBusy] = useState(false);
@@ -72,6 +74,8 @@ function TournamentForm({ initial, onSave, onClose }: { initial: TournamentRow |
         <Field label="CÁCH BIỆT TỐI THIỂU">
           <Segmented full value={f.winBy} onChange={(v) => setF({ ...f, winBy: v })} options={[{ id: 1, label: '1 điểm' }, { id: 2, label: '2 điểm · Win by 2' }]} />
         </Field>
+        <Toggle checked={f.bronzeMatch} onChange={(v) => setF({ ...f, bronzeMatch: v })} label="Tổ chức trận Tranh hạng 3" />
+        {!f.bronzeMatch && <p className={`${T4} -mt-2 text-slate-500`}>2 đội thua Bán kết đồng hạng 3.</p>}
         {!initial && (
           <Field label="NỘI DUNG THI ĐẤU">
             <div className="flex flex-wrap gap-1.5">

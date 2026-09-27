@@ -170,7 +170,7 @@ export async function deleteMember(id: string): Promise<ActionResult<null>> {
 
 const TB_KEYS: TieBreaker[] = ['wins', 'h2h', 'diff', 'pf'];
 
-function cleanTournament(input: TournamentInput): { error: string } | { title: string; venue: string | null; starts_at: string | null; rules: Pick<RulesConfig, 'target' | 'winBy' | 'tieBreakers' | 'courts'> } {
+function cleanTournament(input: TournamentInput): { error: string } | { title: string; venue: string | null; starts_at: string | null; rules: Pick<RulesConfig, 'target' | 'winBy' | 'tieBreakers' | 'courts' | 'autoKnockout' | 'bronzeMatch'> } {
   const title = input.title.trim().replace(/\s+/g, ' ');
   if (title.length < 3 || title.length > 120) return { error: 'Tên giải cần từ 3 đến 120 ký tự.' };
   if (![11, 15, 21].includes(input.target)) return { error: 'Điểm thắng game chỉ nhận 11, 15 hoặc 21.' };
@@ -183,7 +183,7 @@ function cleanTournament(input: TournamentInput): { error: string } | { title: s
     title,
     venue: input.venue.trim() || null,
     starts_at: input.startsAt ? new Date(input.startsAt).toISOString() : null,
-    rules: { target: input.target, winBy: input.winBy, tieBreakers, courts: courtNames(input.courts) },
+    rules: { target: input.target, winBy: input.winBy, tieBreakers, courts: courtNames(input.courts), autoKnockout: input.autoKnockout !== false, bronzeMatch: input.bronzeMatch !== false },
   };
 }
 
@@ -401,6 +401,24 @@ export async function reopenTournament(tournamentId: string): Promise<ActionResu
   const denied = await requireRole(sb, ['admin']);
   if (denied) return { ok: false, error: denied };
   const { error } = await sb.from('tournaments').update({ status: 'ongoing' }).eq('id', tournamentId);
+  return error ? fail(error) : ok(null);
+}
+
+/** "Huỷ lịch vừa tạo": remove the newest knockout stage (not started yet) and pause auto-creation for this event. */
+export async function undoKnockoutStage(eventId: string): Promise<ActionResult<string>> {
+  const sb = createSupabaseServer();
+  const denied = await requireRole(sb, ['admin', 'organizer']);
+  if (denied) return { ok: false, error: denied };
+  const { data, error } = await sb.rpc('undo_knockout_stage', { p_event: eventId });
+  return error ? fail(error) : ok(data as string);
+}
+
+/** Turn auto-creation back on for one event (creates the finals right away if the semis are done). */
+export async function resumeAutoKnockout(eventId: string): Promise<ActionResult<null>> {
+  const sb = createSupabaseServer();
+  const denied = await requireRole(sb, ['admin', 'organizer']);
+  if (denied) return { ok: false, error: denied };
+  const { error } = await sb.rpc('resume_auto_knockout', { p_event: eventId });
   return error ? fail(error) : ok(null);
 }
 

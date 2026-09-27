@@ -115,6 +115,19 @@ export async function assignCourtReferee(tournament: TournamentRow, court: strin
   await refreshTournament(tournament.id);
 }
 
+/**
+ * Tự động tạo vòng loại đầu tiên khi vòng bảng xong. Called by any staff device that sees
+ * the group stage finished; the SQL function is idempotent, so parallel calls are harmless.
+ * Returns the number of matches created (0 = nothing to do / already created).
+ */
+export async function autoCreateKnockout(tournamentId: string, eventId: string, type: MatchType, pairs: [string, string][]) {
+  const { data, error } = await getSupabase().rpc('auto_create_knockout', { p_event: eventId, p_type: type, p_pairs: pairs });
+  if (error) fail(error);
+  const n = (data as number | null) ?? 0;
+  if (n) await getTournamentStore(tournamentId).loadMatches();
+  return n;
+}
+
 /** Pull fresh data after a Server Action (realtime will also deliver it). */
 export async function refreshTournament(tournamentId: string) {
   const store = getTournamentStore(tournamentId);

@@ -73,7 +73,7 @@ function Step({ place, entries, players, tv }: { place: 1 | 2 | 3; entries: Podi
       >
         <Icon className={tv ? 'h-[3cqw] w-[3cqw] text-[#0B0F17]' : 'h-7 w-7 text-[#0B0F17]'} strokeWidth={2.5} />
         <span className={`pm-num font-extrabold leading-none text-[#0B0F17] ${tv ? 'text-[length:5cqw]' : 'text-4xl sm:text-5xl'}`}>{place}</span>
-        <span className={`pm-display font-bold uppercase text-[#0B0F17]/80 ${tv ? 'text-[length:1.2cqw]' : 'text-[11px] sm:text-xs'}`}>{m.label}</span>
+        <span className={`pm-display font-bold uppercase text-[#0B0F17]/80 ${tv ? 'text-[length:1.2cqw]' : 'text-[11px] sm:text-xs'}`}>{place === 3 && entries.length > 1 ? 'Đồng hạng Ba' : m.label}</span>
       </div>
     </div>
   );

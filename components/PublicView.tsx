@@ -240,7 +240,10 @@ export function Bracket({ vm, ev, engine }: { vm: TournamentVM; ev: EventVM; eng
     <div className="flex flex-col gap-3">
       <p className={`${T4} text-slate-500`}>CHUNG KẾT</p>
       <BracketCard label="Chung kết" m={br.final} vm={vm} placeholder={finalSeeds} />
-      {(br.bronze || hasSemis) && <BracketCard label={MATCH_TYPE_LABEL.bronze} m={br.bronze} vm={vm} placeholder={[seed('Thua BK1'), seed('Thua BK2')]} />}
+      {(br.bronze || (hasSemis && vm.rules.bronzeMatch !== false)) && <BracketCard label={MATCH_TYPE_LABEL.bronze} m={br.bronze} vm={vm} placeholder={[seed('Thua BK1'), seed('Thua BK2')]} />}
+      {!br.bronze && hasSemis && vm.rules.bronzeMatch === false && (
+        <p className={`${T4} px-1 text-slate-500`}>Không đá Tranh hạng 3 · 2 đội thua Bán kết đồng hạng 3.</p>
+      )}
     </div>
   );
 
@@ -286,7 +289,7 @@ function Podium({ podium, players }: { podium: PodiumVM; players: PlayerRow[] })
             <div className={`flex w-full flex-col items-center justify-start gap-0.5 rounded-t-2xl bg-gradient-to-b ${c.grad} ${c.h} pt-2`}>
               <Icon className="h-5 w-5 text-slate-950" aria-hidden="true" />
               <span className={`pm-num ${T1} text-slate-950`}>{c.place}</span>
-              <span className={`${T4} text-slate-950/80`}>{c.label}</span>
+              <span className={`${T4} text-slate-950/80`}>{c.place === 3 && podium.entries.filter((e) => e.place === 3).length > 1 ? 'Đồng hạng Ba' : c.label}</span>
             </div>
           </div>
         );

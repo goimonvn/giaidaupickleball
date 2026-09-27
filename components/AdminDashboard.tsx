@@ -2,16 +2,17 @@
 
 import {
   ArrowDown, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight, GitBranch, GripVertical, Hand, Lock, LockOpen,
-  Pencil, Play, Plus, RefreshCw, Scale, Search, Shuffle, Trash2, Trophy, UserRound, Users,
+  Pencil, Play, Plus, RefreshCw, Scale, Search, Shuffle, Trash2, Trophy, Undo2, UserRound, Users, Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  addEvent, addTournamentParticipants, completeTournament, createFinals, deleteEvent, reopenTournament, updateEvent,
+  addEvent, addTournamentParticipants, completeTournament, createFinals, deleteEvent, reopenTournament, resumeAutoKnockout,
+  undoKnockoutStage, updateEvent,
   updateTournament,
 } from '@/lib/actions';
-import { applyEventSetup, assignCourtReferee, callNextMatch, createKnockout, refreshTournament } from '@/lib/client-actions';
+import { applyEventSetup, assignCourtReferee, autoCreateKnockout, callNextMatch, createKnockout, refreshTournament } from '@/lib/client-actions';
 import {
-  dateInputOf, GROUP_LETTERS, startsAtOf, timeInputOf, groupsOfEvent, pairAB, pairBalanced, pairSpread, pairSum, qualifiersOf, snakeByIndex,
+  dateInputOf, firstStagePairs, GROUP_LETTERS, knockoutBlocker, staleFinal, staleKnockout, startsAtOf, timeInputOf, groupsOfEvent, pairAB, pairBalanced, pairSpread, pairSum, qualifiersOf, snakeByIndex,
   STATUS_TAG, stageName, stageType, statusTagOf, TB_LABELS, teamName, type DraftTeam,
 } from '@/lib/engine';
 import { useStandingsEngine, type AuthState } from '@/lib/supabase';
@@ -120,6 +121,8 @@ const inputOf = (vm: TournamentVM): TournamentInput => ({
   target: vm.rules.target,
   winBy: vm.rules.winBy,
   tieBreakers: vm.rules.tieBreakers,
+  autoKnockout: vm.rules.autoKnockout !== false,
+  bronzeMatch: vm.rules.bronzeMatch !== false,
 });
 
 export const EVENT_PRESETS: EventInput[] = [
@@ -244,6 +247,18 @@ function Step1({ vm, toast, onDone }: { vm: TournamentVM; toast: Toast; onDone: 
       <Field label="ƯU TIÊN KHI BẰNG ĐIỂM · KÉO THẢ ĐỂ SẮP XẾP">
         <TieBreakerOrder order={cfg.tieBreakers} onChange={(o) => setCfg({ ...cfg, tieBreakers: o })} disabled={vm.locked} />
       </Field>
+
+      <Field label="VÒNG LOẠI TRỰC TIẾP">
+        <div className="flex flex-col gap-1.5">
+          <Toggle checked={cfg.autoKnockout} onChange={(v) => setCfg({ ...cfg, autoKnockout: v })} label="Tự động tạo Bán kết & Chung kết" />
+          <Toggle checked={cfg.bronzeMatch} onChange={(v) => setCfg({ ...cfg, bronzeMatch: v })} label="Tổ chức trận Tranh hạng 3" />
+        </div>
+      </Field>
+      <p className={`${T4} -mt-2 text-slate-500`}>
+        {cfg.autoKnockout ? 'Bán kết tạo ngay khi vòng bảng xong, Chung kết tạo khi 2 trận Bán kết xong. ' : 'BTC tự bấm tạo lịch ở Bước 3. '}
+        {cfg.bronzeMatch ? '2 đội thua Bán kết đá tranh hạng 3.' : 'Không đá tranh hạng 3: 2 đội thua Bán kết đồng hạng 3.'}
+        {vm.matches.some((m) => m.type === 'final' || m.type === 'bronze') && ' Thay đổi Tranh hạng 3 áp dụng cho Chung kết tạo sau khi lưu.'}
+      </p>
 
       <button type="button" className={BTN_PRIMARY} disabled={busy || cfg.title.trim().length < 3} onClick={() => void save()}>
         {busy ? 'Đang lưu…' : <>Lưu & tiếp tục <ChevronRight className="h-4 w-4" /></>}
@@ -717,7 +732,7 @@ function CourtRow({ vm, court, toast, onOpen }: { vm: TournamentVM; court: { nam
 
 function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: AuthState; toast: Toast }) {
   const engine = useStandingsEngine(vm.tournament.id);
-  const [confirm, setConfirm] = useState<'close' | 'reopen' | null>(null);
+  const [confirm, setConfirm] = useState<'close' | 'reopen' | 'undo' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const openMatch = openId ? vm.matches.find((m) => m.id === openId) : undefined;
@@ -733,6 +748,45 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
   const liveN = vm.courts.filter((c) => c.matchId).length;
   const unfinished = vm.matches.filter((m) => m.status !== 'completed').length;
 
+  // v1.3 auto knockout
+  const order = engine.tieBreakers;
+  const auto = vm.rules.autoKnockout !== false;
+  const paused = !!ev.config.autoOff;
+  const autoOn = auto && !paused;
+  const bronze = vm.rules.bronzeMatch !== false;
+  const finalsLabel = bronze ? 'trận Chung kết & Tranh hạng 3' : 'trận Chung kết';
+  const blocker = groupDone && !hasKnockout ? knockoutBlocker(vm, ev, order) : null;
+  const ko = vm.matches.filter((m) => m.eventId === ev.id && m.type !== 'group');
+  const untouched = (ms: typeof ko) => ms.length > 0 && ms.every((m) => m.status === 'upcoming' && m.sa === 0 && m.sb === 0);
+  const firstStage = ko.filter((m) => m.type === stageType(qualifiers));
+  const finals = ko.filter((m) => m.type === 'final' || m.type === 'bronze');
+  const hasSemis = ko.some((m) => m.type === 'semifinal');
+  const stale = staleKnockout(vm, ev, order);
+  const firstStageUntouched = untouched(firstStage);
+  const finalStale = staleFinal(vm, ev);
+  const finalsUntouched = untouched(finals);
+  // Newest stage that can still be removed without losing results
+  const undoable = finals.length && hasSemis
+    ? (finalsUntouched ? { label: finalsLabel } : null)
+    : (untouched(ko) ? { label: `lịch ${stage}` } : null);
+
+  const redoFirstStage = () => act('redo', async () => {
+    await unwrap(undoKnockoutStage(ev.id));
+    if (auto) await unwrap(resumeAutoKnockout(ev.id)); // the auto hook recreates it from the new standings
+    else {
+      const fp = firstStagePairs(vm, ev, order);
+      if (fp) await createKnockout({ tournamentId: vm.tournament.id, eventId: ev.id, type: fp.type, pairs: fp.pairs, orderOffset: eventOffset(vm, ev.id) + 900 });
+    }
+    await refreshTournament(vm.tournament.id);
+  }, `${ev.label}: đã tạo lại lịch ${stage}`);
+
+  const redoFinals = () => act('redoFinals', async () => {
+    await unwrap(undoKnockoutStage(ev.id));
+    if (auto) await unwrap(resumeAutoKnockout(ev.id)); // recreates the finals from the corrected semis
+    else await unwrap(createFinals(ev.id));
+    await refreshTournament(vm.tournament.id);
+  }, `${ev.label}: đã tạo lại ${finalsLabel}`);
+
   const act = async (key: string, fn: () => Promise<unknown>, okMsg: string) => {
     setBusy(key);
     await run(fn, toast, okMsg);
@@ -743,7 +797,9 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
   const makeKnockout = () => act('ko', async () => {
     const pairs = ties.filter((t) => t[0].team && t[1].team).map((t) => [t[0].team!.id, t[1].team!.id] as [string, string]);
     if (!pairs.length) throw new Error('Chưa đủ đội để tạo lịch loại trực tiếp.');
-    await createKnockout({ tournamentId: vm.tournament.id, eventId: ev.id, type: stageType(qualifiers), pairs, orderOffset: eventOffset(vm, ev.id) + 900 });
+    // Same idempotent path as the auto hook, so a click racing the automatic creation can't duplicate matches
+    if (autoOn && !blocker) await autoCreateKnockout(vm.tournament.id, ev.id, stageType(qualifiers), pairs);
+    else await createKnockout({ tournamentId: vm.tournament.id, eventId: ev.id, type: stageType(qualifiers), pairs, orderOffset: eventOffset(vm, ev.id) + 900 });
   }, `${ev.label}: đã tạo lịch ${stage}`);
 
   return (
@@ -763,14 +819,70 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
         <Bracket vm={vm} ev={ev} engine={engine} />
       </div>
 
-      {!vm.locked && !hasKnockout && ties.length > 0 && (
-        <button type="button" className={BTN_PRIMARY} disabled={!groupDone || busy === 'ko'} onClick={() => void makeKnockout()}>
-          <GitBranch className="h-4 w-4" /> {busy === 'ko' ? 'Đang tạo…' : `Tạo lịch ${stage} (${ties.map((t) => `${t[0].label}–${t[1].label}`).join(', ')})`}
-        </button>
+      {!vm.locked && (
+        <div className={`flex items-start gap-2.5 ${SURFACE} px-3 py-2.5`}>
+          <Zap className={`mt-0.5 h-4 w-4 shrink-0 ${autoOn ? 'text-slate-200' : 'text-slate-500'}`} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className={`${T3} text-slate-200`}>
+              {!auto ? 'Tạo vòng loại thủ công' : paused ? `Đã tạm dừng tự động cho ${ev.label}` : 'Tự động tạo vòng loại trực tiếp'}
+            </p>
+            <p className={`${T4} text-slate-500`}>
+              {!auto
+                ? 'Bật lại ở Bước 1 nếu muốn app tự tạo lịch.'
+                : paused
+                  ? 'Bấm các nút bên dưới để tạo lịch, hoặc bật lại tự động.'
+                  : `${stage} tạo ngay khi vòng bảng xong${qualifiers >= 4 ? `; Chung kết${bronze ? ' & Tranh hạng 3' : ''} tạo khi 2 trận Bán kết xong` : ''}.`}
+              {qualifiers >= 4 && !bronze && ' Không đá Tranh hạng 3: 2 đội thua Bán kết đồng hạng 3.'}
+            </p>
+          </div>
+          {auto && paused && (
+            <button type="button" className={`${BTN_GHOST} min-h-[36px] shrink-0 px-3`} disabled={busy === 'resume'}
+              onClick={() => void act('resume', async () => { await unwrap(resumeAutoKnockout(ev.id)); await refreshTournament(vm.tournament.id); }, `${ev.label}: đã bật lại tự động`)}>
+              Bật lại
+            </button>
+          )}
+        </div>
       )}
-      {!vm.locked && !hasKnockout && ties.length > 0 && !groupDone && <p className={`${T4} -mt-2 text-slate-500`}>Nút sẽ mở khi vòng bảng có đủ kết quả.</p>}
 
-      {!vm.locked && br && br.semis.length === 2 && !br.final && !br.bronze && (
+      {!vm.locked && blocker && (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <p className={`${T3} text-amber-200`}>Chưa tự tạo được {stage}: {blocker}</p>
+          <p className={`${T4} mt-1 text-slate-400`}>BTC quyết định: đổi thứ tự ưu tiên ở Bước 1 (BXH tính lại ngay), hoặc tạo lịch theo thứ tự đang hiển thị bằng nút bên dưới.</p>
+        </div>
+      )}
+
+      {!vm.locked && !hasKnockout && ties.length > 0 && (!autoOn || !!blocker || groupDone) && (
+        <>
+          <button type="button" className={BTN_PRIMARY} disabled={!groupDone || busy === 'ko'} onClick={() => void makeKnockout()}>
+            <GitBranch className="h-4 w-4" /> {busy === 'ko' ? 'Đang tạo…' : `Tạo lịch ${stage} (${ties.map((t) => `${t[0].label}–${t[1].label}`).join(', ')})`}
+          </button>
+          {!groupDone && <p className={`${T4} -mt-2 text-slate-500`}>Nút sẽ mở khi vòng bảng có đủ kết quả.</p>}
+        </>
+      )}
+
+      {!vm.locked && stale.length > 0 && (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <p className={`${T3} text-amber-200`}>Kết quả vòng bảng đã được sửa: cặp đấu {stage} hiện tại không còn khớp bảng xếp hạng.</p>
+          {firstStageUntouched ? (
+            <button type="button" className={`${BTN_GHOST} mt-2 min-h-[36px] w-full`} disabled={busy === 'redo'} onClick={() => void redoFirstStage()}>
+              <RefreshCw className="h-4 w-4" /> {busy === 'redo' ? 'Đang tạo lại…' : `Huỷ & tạo lại ${stage} theo BXH mới`}
+            </button>
+          ) : <p className={`${T4} mt-1 text-slate-400`}>Vòng này đã bắt đầu nên app không tự đổi. BTC cân nhắc xử lý trực tiếp với các đội.</p>}
+        </div>
+      )}
+
+      {!vm.locked && finalStale && (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <p className={`${T3} text-amber-200`}>Kết quả Bán kết đã được sửa: đội vào Chung kết không còn đúng.</p>
+          {finalsUntouched ? (
+            <button type="button" className={`${BTN_GHOST} mt-2 min-h-[36px] w-full`} disabled={busy === 'redoFinals'} onClick={() => void redoFinals()}>
+              <RefreshCw className="h-4 w-4" /> {busy === 'redoFinals' ? 'Đang tạo lại…' : `Huỷ & tạo lại Chung kết${bronze ? ' & Tranh hạng 3' : ''}`}
+            </button>
+          ) : <p className={`${T4} mt-1 text-slate-400`}>Chung kết đã bắt đầu nên app không tự đổi.</p>}
+        </div>
+      )}
+
+      {!vm.locked && br && br.semis.length === 2 && !br.final && !br.bronze && (!autoOn || br.canCreateFinals) && (
         <div className={`rounded-xl border p-3 ${br.canCreateFinals ? 'border-white/20 bg-white/[0.04]' : 'border-white/5'}`}>
           <div className="flex flex-col gap-1.5">
             {br.semis.map((m, i) => {
@@ -784,12 +896,22 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
             })}
           </div>
           <button type="button" disabled={!br.canCreateFinals || busy === 'finals'} className={`mt-3 w-full ${BTN_PRIMARY}`}
-            onClick={() => void act('finals', async () => { await unwrap(createFinals(ev.id)); await refreshTournament(vm.tournament.id); }, `${ev.label}: đã tạo trận Chung kết & Tranh hạng 3`)}>
-            <Trophy className="h-4 w-4" /> {busy === 'finals' ? 'Đang tạo…' : 'Tạo trận Chung kết & Tranh Hạng 3'}
+            onClick={() => void act('finals', async () => { await unwrap(createFinals(ev.id)); await refreshTournament(vm.tournament.id); }, `${ev.label}: đã tạo ${finalsLabel}`)}>
+            <Trophy className="h-4 w-4" /> {busy === 'finals' ? 'Đang tạo…' : `Tạo ${finalsLabel}`}
           </button>
           {!br.canCreateFinals && <p className={`${T4} mt-1.5 text-slate-500`}>Nút sẽ mở khi cả 2 trận Bán kết có kết quả.</p>}
         </div>
       )}
+
+      {!vm.locked && undoable && (confirm === 'undo' ? (
+        <Confirm text={`Huỷ ${undoable.label} vừa tạo của ${ev.label}? Các trận này chưa đấu nên không mất kết quả. Tự động sẽ tạm dừng cho nội dung này.`}
+          confirmLabel="Huỷ lịch" busy={busy === 'undo'} onCancel={() => setConfirm(null)}
+          onConfirm={() => void act('undo', async () => { await unwrap(undoKnockoutStage(ev.id)); await refreshTournament(vm.tournament.id); }, `Đã huỷ ${undoable.label}`)} />
+      ) : (
+        <button type="button" className={`${BTN_GHOST} min-h-[36px]`} onClick={() => setConfirm('undo')}>
+          <Undo2 className="h-4 w-4" /> Huỷ lịch vừa tạo ({undoable.label})
+        </button>
+      ))}
 
       {vm.locked ? (
         <>
@@ -811,7 +933,12 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
           onCancel={() => setConfirm(null)}
           onConfirm={() => void act('close', async () => { await unwrap(completeTournament(vm.tournament.id)); await refreshTournament(vm.tournament.id); }, 'Đã đóng giải. Bảng Vàng đã mở!')} />
       ) : (
-        <button type="button" className={BTN_DANGER} onClick={() => setConfirm('close')}><Lock className="h-4 w-4" /> Đóng / Kết thúc Giải đấu</button>
+        <>
+          {br?.final?.status === 'completed' && (
+            <p className={`${T4} -mb-2 px-1 text-slate-300`}>Chung kết {ev.label} đã xong. Kiểm tra kết quả rồi đóng giải để mở Bảng Vàng.</p>
+          )}
+          <button type="button" className={BTN_DANGER} onClick={() => setConfirm('close')}><Lock className="h-4 w-4" /> Đóng / Kết thúc Giải đấu</button>
+        </>
       )}
       {openMatch && <MatchDrawer m={openMatch} vm={vm} onClose={() => setOpenId(null)} />}
     </div>

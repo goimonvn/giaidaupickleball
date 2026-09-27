@@ -11,6 +11,7 @@ export const GROUP_LETTERS = ['A', 'B', 'C', 'D'] as const;
 export const DEFAULT_TIEBREAKERS: TieBreaker[] = ['wins', 'h2h', 'diff', 'pf'];
 export const DEFAULT_RULES: RulesConfig = {
   target: 11, winBy: 2, pointsPerWin: 2, tieBreakers: DEFAULT_TIEBREAKERS, courts: ['Sân 1', 'Sân 2'],
+  autoKnockout: true, bronzeMatch: true,
 };
 
 export const TB_LABELS: Record<TieBreaker, string> = {
@@ -264,7 +265,7 @@ export const groupsOfEvent = (ev: EventVM | undefined): (string | null)[] => {
 export function computeStandings(vm: Pick<TournamentVM, 'teams' | 'matches'>, eventId: string, group: string | null, order: TieBreaker[], pointsPerWin = 2): StandingRow[] {
   const rows: StandingRow[] = vm.teams
     .filter((t) => t.eventId === eventId && (group == null || t.group === group))
-    .map((t) => ({ team: t, p: 0, w: 0, l: 0, pf: 0, pa: 0, diff: 0, pts: 0, live: false }));
+    .map((t) => ({ team: t, p: 0, w: 0, l: 0, pf: 0, pa: 0, diff: 0, pts: 0, live: false, tiedWithPrev: false }));
   const byId = new Map(rows.map((r) => [r.team.id, r]));
   const done = vm.matches.filter((m) => m.eventId === eventId && m.type === 'group' && m.status === 'completed' && byId.has(m.a) && byId.has(m.b));
   done.forEach((m) => {
@@ -281,22 +282,28 @@ export function computeStandings(vm: Pick<TournamentVM, 'teams' | 'matches'>, ev
     if (B) B.live = true;
   });
   rows.forEach((r) => { r.diff = r.pf - r.pa; r.pts = r.w * pointsPerWin; });
-  const h2h = (a: StandingRow, b: StandingRow) => {
-    const m = done.find((x) => (x.a === a.team.id && x.b === b.team.id) || (x.a === b.team.id && x.b === a.team.id));
-    if (!m) return 0;
-    return (m.sa > m.sb ? m.a : m.b) === a.team.id ? -1 : 1;
-  };
-  rows.sort((a, b) => {
+  // Đối đầu = mini-league among the teams still level on every criterion ranked before 'h2h'.
+  // For 2 teams this is simply who won their match; for 3+ it avoids A>B>C>A cycles.
+  const val = (r: StandingRow, k: TieBreaker) => (k === 'wins' ? r.w : k === 'diff' ? r.diff : k === 'pf' ? r.pf : 0);
+  const before = order.slice(0, Math.max(0, order.indexOf('h2h')));
+  const blockKey = (r: StandingRow) => before.map((k) => val(r, k)).join('|');
+  const miniWins = new Map<string, number>();
+  if (order.includes('h2h')) {
+    rows.forEach((r) => {
+      const key = blockKey(r);
+      const block = new Set(rows.filter((x) => blockKey(x) === key).map((x) => x.team.id));
+      miniWins.set(r.team.id, done.filter((m) => block.has(m.a) && block.has(m.b) && (m.sa > m.sb ? m.a : m.b) === r.team.id).length);
+    });
+  }
+  const cmp = (a: StandingRow, b: StandingRow) => {
     for (const k of order) {
-      let d = 0;
-      if (k === 'wins') d = b.w - a.w;
-      if (k === 'diff') d = b.diff - a.diff;
-      if (k === 'pf') d = b.pf - a.pf;
-      if (k === 'h2h') d = h2h(a, b);
+      const d = k === 'h2h' ? (miniWins.get(b.team.id) ?? 0) - (miniWins.get(a.team.id) ?? 0) : val(b, k) - val(a, k);
       if (d !== 0) return d;
     }
-    return (a.team.seed ?? 99) - (b.team.seed ?? 99) || a.team.id.localeCompare(b.team.id);
-  });
+    return 0;
+  };
+  rows.sort((a, b) => cmp(a, b) || (a.team.seed ?? 99) - (b.team.seed ?? 99) || a.team.id.localeCompare(b.team.id));
+  rows.forEach((r, i) => { r.tiedWithPrev = i > 0 && done.length > 0 && cmp(rows[i - 1], r) === 0; });
   return rows;
 }
 
@@ -359,6 +366,9 @@ export const RPC_ERRORS: Record<string, string> = {
   ADMIN_ONLY_DELETE: 'Chỉ Admin mới xoá được giải đã kết thúc.',
   TOURNAMENT_NOT_FOUND: 'Không tìm thấy giải đấu (có thể đã bị xoá).',
   matches_referee_len: 'Tên trọng tài tối đa 60 ký tự.',
+  KNOCKOUT_STARTED: 'Vòng này đã có trận bắt đầu nên không huỷ được.',
+  INVALID_PAIRS: 'Cặp đấu loại trực tiếp không hợp lệ.',
+  INVALID_STAGE: 'Vòng đấu không hợp lệ.',
   ADMIN_ONLY: 'Chỉ Admin mới mở lại được giải đã kết thúc.',
   LAST_ADMIN: 'Phải còn ít nhất một Admin. Hãy thêm Admin khác trước.',
   ADMIN_EXISTS: 'Hệ thống đã có Admin.',
@@ -575,3 +585,57 @@ export const fmtDateVN = (iso: string | null) =>
 /** Group name shown in score strips: "Bảng A", "Vòng bảng" or the knockout stage. */
 export const stageLabelOf = (m: Pick<MatchVM, 'type' | 'group'>) =>
   m.type === 'group' ? (m.group ? `Bảng ${m.group}` : 'Vòng bảng') : MATCH_TYPE_LABEL[m.type];
+
+/* ---------------------------- v1.3: auto knockout ---------------------------- */
+
+/**
+ * Why the first knockout stage can't be created automatically yet (null = ready).
+ * A tie only matters where it changes who plays whom: the qualifying boundary always,
+ * and 1st vs 2nd in a group when seeds cross groups (1A–2B, 1B–2A).
+ */
+export function knockoutBlocker(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): string | null {
+  const cfg = ev.config;
+  const crossSeeded = cfg.groupsEnabled && cfg.advance === 2;
+  for (const g of groupsOfEvent(ev)) {
+    const rows = computeStandings(vm, ev.id, g, order, vm.rules.pointsPerWin);
+    const check = crossSeeded ? Array.from({ length: cfg.advance }, (_, i) => i + 1) : [cfg.advance];
+    for (const i of check) {
+      const r = rows[i];
+      if (r?.tiedWithPrev) {
+        const where = g ? `Bảng ${g}` : ev.label;
+        return `${where}: ${teamName(rows[i - 1].team, vm.players)} và ${teamName(r.team, vm.players)} bằng nhau ở mọi tiêu chí ưu tiên (hạng ${i}–${i + 1}).`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The pairs of the first knockout stage, ready for auto_create_knockout (null if not ready / not applicable). */
+export function firstStagePairs(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): { type: MatchType; pairs: [string, string][] } | null {
+  const ties = knockoutTies(vm, ev, order);
+  const pairs = ties.filter((t) => t[0].team && t[1].team).map((t) => [t[0].team!.id, t[1].team!.id] as [string, string]);
+  if (!pairs.length || pairs.length !== ties.length) return null;
+  return { type: stageType(qualifiersOf(ev.config)), pairs };
+}
+
+/**
+ * First-stage knockout matches whose teams no longer match the current standings
+ * (a group result was corrected after the stage was created). Empty = all good.
+ */
+export function staleKnockout(vm: TournamentVM, ev: EventVM, order: TieBreaker[]): MatchVM[] {
+  const first = vm.matches.filter((m) => m.eventId === ev.id && m.type === stageType(qualifiersOf(ev.config)));
+  if (!first.length) return [];
+  const want = firstStagePairs(vm, ev, order)?.pairs ?? [];
+  const key = (a: string, b: string) => [a, b].sort().join('|');
+  const wanted = new Set(want.map(([a, b]) => key(a, b)));
+  return first.filter((m) => !wanted.has(key(m.a, m.b)));
+}
+
+/** Final teams no longer match the semifinal winners (a semifinal result was corrected). */
+export function staleFinal(vm: TournamentVM, ev: EventVM): boolean {
+  const semis = vm.matches.filter((m) => m.eventId === ev.id && m.type === 'semifinal');
+  const final = vm.matches.find((m) => m.eventId === ev.id && m.type === 'final');
+  if (!final || semis.length !== 2 || semis.some((s) => s.status !== 'completed')) return false;
+  const winners = new Set(semis.map((s) => (s.sa > s.sb ? s.a : s.b)));
+  return !(winners.has(final.a) && winners.has(final.b));
+}

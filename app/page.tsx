@@ -10,6 +10,7 @@ import ScorekeeperView from '@/components/ScorekeeperView';
 import TournamentManager from '@/components/TournamentManager';
 import { finalizeMatch, matchAction } from '@/lib/client-actions';
 import { isGameOver } from '@/lib/engine';
+import { useAutoKnockout } from '@/hooks/useAutoKnockout';
 import { useAuth, useTournamentData, useTournaments, type AuthState } from '@/lib/supabase';
 import type { AppScreen, BtcDraft, PublicTab, TournamentVM, UIState } from '@/lib/types';
 
@@ -145,6 +146,8 @@ export default function Home() {
 
   const { vm, status, error, connected } = useTournamentData(tournamentId);
   const current = tournaments.find((t) => t.id === tournamentId) ?? vm?.tournament ?? null;
+  // Group stage finished → create the first knockout stage automatically (any staff device)
+  useAutoKnockout(vm, auth.isStaff, toast);
 
   // Guests opening a finished tournament land on Vinh Danh once
   const podiumShown = useRef<string | null>(null);
