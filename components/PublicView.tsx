@@ -45,7 +45,7 @@ export function ScoreStrip({ m, vm, onOpen, showEvent = false }: { m: MatchVM; v
     <button type="button" onClick={onOpen} className="block w-full px-4 py-2.5 text-left transition hover:bg-white/[0.03]" aria-label={`Chi tiết trận ${teamName(teamOf(vm, m.a), vm.players)} gặp ${teamName(teamOf(vm, m.b), vm.players)}`}>
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className={`${T4} truncate text-slate-500`}>{meta}</span>
-        {live ? <LiveBadge label={liveLabel(m)} /> : done ? <span className={`${T4} shrink-0 text-slate-500`}>Kết thúc</span> : <span className={`${T4} shrink-0 text-slate-400`}>{m.time}</span>}
+        {live ? <LiveBadge label={liveLabel(m)} /> : done ? <span className={`${T4} shrink-0 text-slate-500`}>{m.walkover ? 'Xử thua · vắng mặt' : 'Kết thúc'}</span> : <span className={`${T4} shrink-0 text-slate-400`}>{m.time}</span>}
       </div>
       {rows.map(([k, tid, score]) => {
         const team = teamOf(vm, tid);
@@ -95,7 +95,7 @@ export function MatchDrawer({ m, vm, onClose }: { m: MatchVM; vm: TournamentVM; 
     <Sheet title={title} onClose={onClose}>
       <div className="flex items-center justify-between gap-2">
         <span className={`${T4} text-slate-500`}>{m.court ?? (m.time ? `Dự kiến ${m.time}` : 'Chưa xếp sân')}</span>
-        {live ? <LiveBadge label={liveLabel(m)} /> : <span className={`${T4} text-slate-400`}>{m.status === 'completed' ? 'Kết thúc' : 'Chưa thi đấu'}</span>}
+        {live ? <LiveBadge label={liveLabel(m)} /> : <span className={`${T4} text-slate-400`}>{m.status === 'completed' ? (m.walkover ? 'Xử thua do vắng mặt' : 'Kết thúc') : 'Chưa thi đấu'}</span>}
       </div>
 
       <div className="mt-3 flex flex-col gap-3">
@@ -206,7 +206,7 @@ function TeamSheet({ teamId, vm, rank, onOpenMatch, onClose }: {
     const oppScore = isA ? m.sb : m.sa;
     const won = m.status === 'completed' && winnerIdOf(m) === teamId;
     const isLive = m.status === 'live';
-    const meta = [stageLabelOf(m), m.court ?? (m.status === 'upcoming' ? m.time || 'Chưa xếp giờ' : null)].filter(Boolean).join(' • ');
+    const meta = [stageLabelOf(m), m.court ?? (m.status === 'upcoming' ? m.time || 'Chưa xếp giờ' : null), m.walkover ? 'Xử thua do vắng' : null].filter(Boolean).join(' • ');
     return (
       <li key={m.id}>
         <button type="button" onClick={() => onOpenMatch(m.id)} className="flex min-h-[52px] w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-white/[0.03]">

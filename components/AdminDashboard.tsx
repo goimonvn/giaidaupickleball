@@ -2,7 +2,7 @@
 
 import {
   ArrowDown, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight, GitBranch, GripVertical, Hand, Lock, LockOpen,
-  Pencil, Play, Plus, RefreshCw, Scale, Search, Shuffle, Trash2, Trophy, Undo2, UserRound, Users, Zap,
+  CalendarClock, Megaphone, Pencil, Play, Plus, QrCode, RefreshCw, Scale, Search, Shuffle, Trash2, Trophy, Undo2, UserRound, Users, Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -10,7 +10,7 @@ import {
   undoKnockoutStage, updateEvent,
   updateTournament,
 } from '@/lib/actions';
-import { applyEventSetup, assignCourtReferee, autoCreateKnockout, callNextMatch, createKnockout, refreshTournament } from '@/lib/client-actions';
+import { applyEventSetup, assignCourtReferee, autoCreateKnockout, callNextMatch, callOnTv, createKnockout, refreshTournament } from '@/lib/client-actions';
 import {
   dateInputOf, firstStagePairs, GROUP_LETTERS, knockoutBlocker, staleFinal, staleKnockout, startsAtOf, timeInputOf, groupsOfEvent, pairAB, pairBalanced, pairSpread, pairSum, qualifiersOf, snakeByIndex,
   STATUS_TAG, stageName, stageType, statusTagOf, TB_LABELS, teamName, type DraftTeam,
@@ -23,7 +23,9 @@ import {
   BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, Checkbox, chipCls, Confirm, DATE_INPUT, Empty, Field, ICON_BTN, INPUT, LiveBadge,
   optionCls, Segmented, Sheet, StripGroup, SURFACE, T1, T2, T3, T4, Toggle, type Toast,
 } from './kit';
+import { CheckInPanel, RescheduleSheet } from './MatchdayPanels';
 import { Bracket, MatchDrawer, ScoreStrip } from './PublicView';
+import { QRShareSheet } from './QRCode';
 
 /* =====================================================================
    BTC dashboard — 3-step accordion (approved v4 demo)
@@ -693,7 +695,19 @@ function CourtRow({ vm, court, toast, onOpen }: { vm: TournamentVM; court: { nam
 
   return (
     <div className="flex flex-col">
-      {m ? <ScoreStrip m={m} vm={vm} onOpen={() => onOpen(m.id)} showEvent={vm.events.length > 1} /> : (
+      {m ? (
+        <>
+          <ScoreStrip m={m} vm={vm} onOpen={() => onOpen(m.id)} showEvent={vm.events.length > 1} />
+          {!vm.locked && (
+            <div className="flex justify-end px-4 pb-1">
+              <button type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 ${T4} text-slate-400 hover:bg-white/5 hover:text-white`} disabled={busy}
+                onClick={async () => { setBusy(true); await run(() => callOnTv(vm.tournament.id, m.id), toast, `${court.name}: đã gọi lại trên TV`); setBusy(false); }}>
+                <Megaphone className="h-3.5 w-3.5" /> Gọi lại đội ra sân trên TV
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
         <div className="flex items-center justify-between gap-2 px-4 py-3">
           <span className={`${T3} text-slate-400`}>{court.name} · sân trống</span>
           {!vm.locked && (
@@ -702,7 +716,7 @@ function CourtRow({ vm, court, toast, onOpen }: { vm: TournamentVM; court: { nam
                 setBusy(true);
                 await run(async () => {
                   const id = await callNextMatch(vm.tournament.id, court.name);
-                  toast(id ? `${court.name}: đã gọi trận kế tiếp` : 'Không còn trận nào đang chờ (hoặc các đội đang bận).', id ? 'ok' : 'error');
+                  toast(id ? `${court.name}: đã gọi trận kế tiếp` : vm.rules.checkIn ? 'Chưa có trận sẵn sàng: các đội đang bận hoặc chưa điểm danh đủ người.' : 'Không còn trận nào đang chờ (hoặc các đội đang bận).', id ? 'ok' : 'error');
                 }, toast);
                 setBusy(false);
               }}>
@@ -735,6 +749,7 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
   const [confirm, setConfirm] = useState<'close' | 'reopen' | 'undo' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<'reschedule' | 'qr' | null>(null);
   const openMatch = openId ? vm.matches.find((m) => m.id === openId) : undefined;
 
   const groupMs = vm.matches.filter((m) => m.eventId === ev.id && m.type === 'group');
@@ -809,10 +824,19 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
         <div className="h-1.5 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-slate-300 transition-all" style={{ width: `${groupMs.length ? (groupDoneN / groupMs.length) * 100 : 0}%` }} /></div>
       </div>
 
+      {!vm.locked && (
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" className={BTN_GHOST} onClick={() => setSheet('reschedule')}><CalendarClock className="h-4 w-4" /> Dời lịch</button>
+          <button type="button" className={BTN_GHOST} onClick={() => setSheet('qr')}><QrCode className="h-4 w-4" /> Mã QR giải</button>
+        </div>
+      )}
+
       <StripGroup title="Sân & Trọng tài" right={liveN ? <LiveBadge label={`${liveN} SÂN`} /> : <span className={`${T4} text-slate-500`}>{vm.courts.length} sân</span>}>
         {vm.courts.map((c) => <CourtRow key={c.name} vm={vm} court={c} toast={toast} onOpen={setOpenId} />)}
       </StripGroup>
-      <p className={`${T4} -mt-2 px-1 text-slate-500`}>Trọng tài của sân sẽ tự gán cho mỗi trận lên sân đó. Nhập điểm ở tab Trọng Tài.</p>
+      <p className={`${T4} -mt-2 px-1 text-slate-500`}>Trọng tài của sân sẽ tự gán cho mỗi trận lên sân đó. Khi trận lên sân, màn TV tự hiện lời mời đội ra sân.</p>
+
+      <CheckInPanel vm={vm} ev={ev} toast={toast} />
 
       <div className="flex flex-col gap-2">
         <span className={`${T4} text-slate-500`}>VÒNG LOẠI TRỰC TIẾP</span>
@@ -941,6 +965,8 @@ function Step3({ vm, ev, auth, toast }: { vm: TournamentVM; ev: EventVM; auth: A
         </>
       )}
       {openMatch && <MatchDrawer m={openMatch} vm={vm} onClose={() => setOpenId(null)} />}
+      {sheet === 'reschedule' && <RescheduleSheet vm={vm} toast={toast} onClose={() => setSheet(null)} />}
+      {sheet === 'qr' && <QRShareSheet tournament={vm.tournament} toast={toast} onClose={() => setSheet(null)} />}
     </div>
   );
 }
@@ -964,6 +990,7 @@ export default function AdminDashboard({
   useEffect(() => { setStep(!vm?.events.length ? 1 : vm?.matches.length ? 3 : 2); }, [tid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ev = useMemo(() => vm?.events.find((e) => e.id === ui.adminEvent) ?? vm?.events[0], [vm?.events, ui.adminEvent]);
+  const [qrOpen, setQrOpen] = useState(false);
 
   if (!auth.isOrganizer) {
     return (
@@ -1001,8 +1028,12 @@ export default function AdminDashboard({
           <p className={`${T4} text-slate-500`}>{auth.isAdmin ? 'ADMIN · BAN TỔ CHỨC' : 'BAN TỔ CHỨC'}</p>
           <h1 className={`${T1} truncate text-white`}>{vm.tournament.title}</h1>
         </div>
-        <span className={`${T4} shrink-0 rounded-md px-2 py-1 ${tag.cls}`}>{tag.label}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" aria-label="Mã QR của giải" title="Mã QR của giải" onClick={() => setQrOpen(true)} className={ICON_BTN}><QrCode className="h-4 w-4" /></button>
+          <span className={`${T4} rounded-md px-2 py-1 ${tag.cls}`}>{tag.label}</span>
+        </div>
       </div>
+      {qrOpen && <QRShareSheet tournament={vm.tournament} toast={toast} onClose={() => setQrOpen(false)} />}
       {vm.locked && (
         <div role="status" className={`flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 ${T3} text-amber-200`}>
           <Lock className="h-4 w-4 shrink-0" /> Giải đã khoá. {auth.isAdmin ? 'Mở lại ở Bước 3 hoặc Quản lý giải đấu nếu cần sửa.' : 'Chỉ Admin mở lại được.'}

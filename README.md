@@ -105,6 +105,17 @@ Chạy thêm migration `supabase/migrations/20260929000000_auto_knockout.sql`. S
 - BTC có thể **Huỷ lịch vừa tạo** khi các trận đó chưa đấu (tự động tạm dừng cho nội dung đó, bấm **Bật lại** để tiếp tục).
 - Bước 1 có 2 công tắc: **Tự động tạo Bán kết & Chung kết** và **Tổ chức trận Tranh hạng 3**. Tắt Tranh hạng 3 thì 2 đội thua Bán kết đồng hạng 3.
 
+### 5d. Bản 1.4 (ngày thi đấu)
+
+Chạy thêm migration `supabase/migrations/20260930000000_matchday.sql`. Tất cả nằm ở BTC → Bước 3:
+
+- **Điểm danh:** chạm tên VĐV để đánh dấu có mặt, hoặc bấm "Có mặt tất cả". Bật "Chỉ gọi trận lên sân khi đủ VĐV có mặt" thì trận có người vắng sẽ được bỏ qua, trận sau lên trước.
+- **Xử thua do vắng mặt:** nút "Xử thua" cạnh đội còn thiếu người (đối thủ thắng 11–0, ghi "Xử thua · vắng mặt"). Trọng tài cũng làm được ở Kết quả nhanh.
+- **Thay người:** nút ⇄ cạnh tên VĐV, chọn thành viên chưa có trong nội dung đó.
+- **Dời lịch:** chọn giờ trận kế tiếp bắt đầu và số phút mỗi trận, app tính lại giờ mọi trận chưa đấu.
+- **Gọi đội ra sân trên TV:** trận vừa lên sân thì màn `/tv/<id>` hiện lời mời 12 giây, kèm tiếng chuông (bấm "Bật âm thanh gọi đội" một lần trên máy TV) và giọng đọc tiếng Việt nếu trình duyệt có. BTC bấm "Gọi lại đội ra sân trên TV" để hiện lại.
+- **Mã QR của giải:** nút QR ở BTC và Quản lý giải đấu, tải ảnh hoặc in để dán ở sân. Màn TV cũng hiện mã QR.
+
 ## Phân quyền
 
 | Vai trò | Xem giải / TV | Nhập điểm | Tạo giải, ghép cặp, chia bảng, thành viên, đóng giải | Phân quyền, mở lại giải |

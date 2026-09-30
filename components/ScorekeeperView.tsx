@@ -2,7 +2,7 @@
 
 import { Activity, CheckCircle2, ClipboardEdit, Clock, Lock, Minus, Play, Plus, RefreshCw, Undo2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { callNextMatch, finalizeMatch, matchAction } from '@/lib/client-actions';
+import { callNextMatch, finalizeMatch, matchAction, walkoverMatch } from '@/lib/client-actions';
 import { isGameOver, scoreCall, stageLabelOf, teamName } from '@/lib/engine';
 import type { AuthState } from '@/lib/supabase';
 import type { CourtVM, MatchActionType, MatchVM, TournamentVM, UIState } from '@/lib/types';
@@ -52,7 +52,7 @@ function ScorePad({ court, vm, hiddenOnMobile, toast }: { court: CourtVM; vm: To
                 setBusy(true);
                 try {
                   const id = await callNextMatch(vm.tournament.id, court.name);
-                  if (!id) toast('Chưa có trận nào sẵn sàng (các đội còn lại đang thi đấu).', 'error');
+                  if (!id) toast(vm.rules.checkIn ? 'Chưa có trận nào sẵn sàng: các đội còn lại đang thi đấu hoặc chưa điểm danh đủ người.' : 'Chưa có trận nào sẵn sàng (các đội còn lại đang thi đấu).', 'error');
                 } catch (e) {
                   toast((e as Error).message, 'error');
                 } finally {
@@ -219,9 +219,11 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
   const sel = vm.matches.find((m) => m.id === ui.quickMatch) ?? null;
   const [sa, setSa] = useState('');
   const [sb, setSb] = useState('');
+  const [woSide, setWoSide] = useState<'A' | 'B' | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    setWoSide(null);
     if (!sel) return;
     setSa(sel.status === 'upcoming' ? '' : String(sel.sa));
     setSb(sel.status === 'upcoming' ? '' : String(sel.sb));
@@ -246,6 +248,22 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
       const winner = na > nb ? A : B;
       toast(`Đã lưu: ${teamName(winner, vm.players, true)} thắng ${Math.max(na, nb)}–${Math.min(na, nb)}`);
       setUi({ quickMatch: sel.status === 'completed' ? null : nextPending ? nextPending.id : null });
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forfeit = async (absent: 'A' | 'B') => {
+    if (!sel) return;
+    const nextPending = pending.find((m) => m.id !== sel.id);
+    setBusy(true);
+    try {
+      await walkoverMatch(vm.tournament.id, sel.id, absent === 'A' ? 'B' : 'A');
+      toast(`Đã xử ${teamName(absent === 'A' ? A : B, vm.players, true)} thua do vắng mặt`);
+      setWoSide(null);
+      setUi({ quickMatch: nextPending ? nextPending.id : null });
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -288,6 +306,17 @@ function QuickEntry({ vm, ui, setUi, toast }: { vm: TournamentVM; ui: UIState; s
               <CheckCircle2 className="h-4 w-4" /> {busy ? 'Đang lưu…' : 'Xác nhận kết quả'}
             </button>
           </div>
+          {sel.status !== 'completed' && (woSide ? (
+            <Confirm danger busy={busy}
+              text={`Xử ${teamName(woSide === 'A' ? A : B, vm.players)} thua do vắng mặt? Đối thủ thắng ${rules.target}–0.`}
+              confirmLabel="Xử thua" onCancel={() => setWoSide(null)} onConfirm={() => void forfeit(woSide)} />
+          ) : (
+            <div className="flex items-center gap-2 border-t border-white/5 pt-3">
+              <span className={`${T4} mr-auto text-slate-500`}>VẮNG MẶT?</span>
+              <button type="button" className={`h-9 rounded-lg px-2.5 ${T4} text-rose-300 hover:bg-rose-500/10`} onClick={() => setWoSide('A')}>Đội A bỏ cuộc</button>
+              <button type="button" className={`h-9 rounded-lg px-2.5 ${T4} text-rose-300 hover:bg-rose-500/10`} onClick={() => setWoSide('B')}>Đội B bỏ cuộc</button>
+            </div>
+          ))}
         </div>
       ) : (
         <p className={`${T3} px-1 text-slate-400`}>Chạm một trận để nhập tỉ số chung cuộc (dùng cho sân không có trọng tài bàn).</p>

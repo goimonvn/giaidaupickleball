@@ -37,7 +37,7 @@ export default function TVPage({ params, searchParams }: { params: { tournamentI
   }
   return (
     <>
-      <TVBroadcastView vm={vm} ui={ui} setUi={setUi} standalone />
+      <TVBroadcastView vm={vm} ui={ui} setUi={setUi} standalone ready={status === 'ready'} />
       {!connected && (
         <div className="fixed left-3 top-3 rounded-md bg-rose-600/90 px-2 py-1 text-[10px] font-medium tracking-wide text-white">Mất kết nối realtime · đang thử lại</div>
       )}

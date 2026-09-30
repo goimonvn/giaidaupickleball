@@ -128,6 +128,67 @@ export async function autoCreateKnockout(tournamentId: string, eventId: string, 
   return n;
 }
 
+/* ---------------------------- v1.4: ngày thi đấu ---------------------------- */
+
+/** Điểm danh: mark a player present / absent for the tournament. */
+export async function setCheckin(tournamentId: string, playerId: string, present: boolean) {
+  const { error } = await getSupabase().rpc('set_checkin', { p_tournament: tournamentId, p_player: playerId, p_present: present });
+  if (error) fail(error);
+  await getTournamentStore(tournamentId).loadSetup();
+}
+
+/** "Có mặt tất cả": check in a list of players in one call. */
+export async function setCheckinMany(tournamentId: string, playerIds: string[], present: boolean) {
+  const { error } = await getSupabase().rpc('set_checkin_many', { p_tournament: tournamentId, p_players: playerIds, p_present: present });
+  if (error) fail(error);
+  await getTournamentStore(tournamentId).loadSetup();
+}
+
+/** Merge keys into rules_config on the server (safe against concurrent edits). */
+export async function patchRules(tournamentId: string, patch: Partial<RulesConfig>) {
+  const { error } = await getSupabase().rpc('patch_rules', { p_tournament: tournamentId, p_patch: patch });
+  if (error) fail(error);
+  await getTournamentStore(tournamentId).loadSetup();
+}
+
+/** Xử thua do vắng mặt: `winner` side wins target–0; a live match frees its court for the next one. */
+export async function walkoverMatch(tournamentId: string, matchId: string, winner: 'A' | 'B') {
+  const { error } = await getSupabase().rpc('walkover_match', { p_match: matchId, p_winner: winner });
+  if (error) fail(error);
+  await getTournamentStore(tournamentId).loadMatches();
+}
+
+/** Dời lịch: re-time all upcoming matches from `start`, `slotMinutes` per round of courts. */
+export async function rescheduleMatches(tournamentId: string, start: Date, slotMinutes: number) {
+  const { data, error } = await getSupabase().rpc('reschedule_matches', { p_tournament: tournamentId, p_start: start.toISOString(), p_slot: slotMinutes });
+  if (error) fail(error);
+  await refreshTournament(tournamentId);
+  return (data as number | null) ?? 0;
+}
+
+/** Thay người: swap one player of a team for another member (team name follows). */
+export async function substitutePlayer(tournamentId: string, teamId: string, oldPlayerId: string, newPlayerId: string) {
+  const store = getTournamentStore(tournamentId);
+  const snap = store.getSnapshot();
+  const team = snap.teams.find((t) => t.id === teamId);
+  if (!team) throw new Error('Không tìm thấy đội.');
+  const patch: { player_1_id?: string; player_2_id?: string | null } = {};
+  if (team.player_1_id === oldPlayerId) patch.player_1_id = newPlayerId;
+  else if (team.player_2_id === oldPlayerId) patch.player_2_id = newPlayerId;
+  else throw new Error('VĐV không thuộc đội này.');
+  const ids = [patch.player_1_id ?? team.player_1_id, patch.player_2_id !== undefined ? patch.player_2_id : team.player_2_id].filter(Boolean) as string[];
+  const team_name = ids.map((id) => snap.players.find((p) => p.id === id)?.full_name ?? '?').join(' / ');
+  const { error } = await getSupabase().from('group_teams').update({ ...patch, team_name }).eq('id', teamId);
+  if (error) fail(error);
+  await store.loadSetup();
+}
+
+/** "Gọi lại trên TV": show the call-to-court overlay on every open TV screen. */
+export async function callOnTv(tournamentId: string, matchId: string) {
+  const ok = await getTournamentStore(tournamentId).sendCall(matchId);
+  if (!ok) throw new Error('Chưa kết nối realtime, thử lại sau vài giây.');
+}
+
 /** Pull fresh data after a Server Action (realtime will also deliver it). */
 export async function refreshTournament(tournamentId: string) {
   const store = getTournamentStore(tournamentId);

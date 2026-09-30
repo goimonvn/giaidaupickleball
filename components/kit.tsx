@@ -10,8 +10,7 @@
    ===================================================================== */
 import type { LucideIcon } from 'lucide-react';
 import { Check, X } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
-import { useClickOutside } from '@/hooks/useClickOutside';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 export const T1 = 'text-lg font-bold'; // headers & titles
 export const T2 = 'text-sm font-semibold'; // card titles & subheaders
@@ -173,18 +172,33 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className={`${CARD} p-8 text-center ${T3} text-slate-400`}>{children}</div>;
 }
 
-/** Bottom sheet on mobile, centred dialog on desktop. Closes on outside click / Escape. */
+/** Bottom sheet on mobile, centred dialog on desktop. Closes on a tap on the dimmed backdrop, the ✕ button or Escape. */
 export function Sheet({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  useClickOutside(ref, true, onClose);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Only a tap that starts AND ends on the backdrop closes (dragging out of a text field doesn't)
+  const downOnBackdrop = useRef(false);
+  // Escape closes; outside taps are handled by the backdrop's onClick (a click, not pointerdown,
+  // so the tap can't fall through and re-open whatever sits underneath)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4">
+    <div
+      className="fixed inset-0 z-[60] flex cursor-pointer items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4"
+      // Tapping the dimmed area closes the sheet (explicit handler: reliable on iOS Safari too)
+      onPointerDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); }}
+    >
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`pm-sheet max-h-[88vh] w-full ${wide ? 'max-w-2xl' : 'max-w-md'} overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-900 sm:rounded-2xl`}
+        className={`pm-sheet max-h-[88vh] w-full cursor-auto ${wide ? 'max-w-2xl' : 'max-w-md'} overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-900 sm:rounded-2xl`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-white/10 sm:hidden" />

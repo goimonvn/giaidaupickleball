@@ -36,3 +36,4 @@ html, body { background: #020617; }
 /* iOS Safari: native date/time inputs get an intrinsic min width and centred text — keep them inside their box */
 .pm-root input[type=date], .pm-root input[type=time] { -webkit-appearance: none; appearance: none; min-width: 0; }
 .pm-root input::-webkit-date-and-time-value { text-align: left; }
+@keyframes pm-shrink { from { transform: scaleX(1) } to { transform: scaleX(0) } }

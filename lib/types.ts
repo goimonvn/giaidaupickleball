@@ -29,6 +29,10 @@ export interface RulesConfig {
   autoKnockout?: boolean;
   /** Có đá Tranh hạng 3 không. Tắt: 2 đội thua Bán kết đồng hạng 3 (mặc định bật) */
   bronzeMatch?: boolean;
+  /** Điểm danh: chỉ gọi trận lên sân khi mọi VĐV của 2 đội đã có mặt */
+  checkIn?: boolean;
+  /** Số phút cho mỗi lượt trận khi xếp / dời lịch (mặc định 20) */
+  slotMinutes?: number;
 }
 
 export interface GroupConfig {
@@ -164,6 +168,8 @@ export interface MatchRow {
   completed_at: string | null;
   /** Trọng tài của trận (copy từ rules_config.referees khi trận lên sân) */
   referee: string | null;
+  /** Xử thua do vắng mặt */
+  walkover?: boolean;
   updated_by: string | null;
   created_at: string;
   updated_at: string;
@@ -215,6 +221,8 @@ export interface MatchVM {
   historyLength: number;
   updatedAt: string;
   referee: string | null;
+  /** Kết quả do xử thua (đội kia vắng mặt) */
+  walkover: boolean;
   /** Hiệp đang đấu. Hiện mỗi trận là 1 game nên luôn = 1 (để sẵn cho thể thức best-of-3). */
   game: number;
 }
@@ -233,6 +241,8 @@ export interface TournamentVM {
   players: PlayerRow[];
   /** Player ids registered for this tournament (empty = everyone in the member database) */
   participantIds: string[];
+  /** Player ids that are checked in (Điểm danh) for this tournament */
+  checkedInIds: string[];
   courts: CourtVM[];
   locked: boolean;
 }

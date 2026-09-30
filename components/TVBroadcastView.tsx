@@ -1,12 +1,143 @@
 'use client';
 
-import { CheckCircle2, Crown, ExternalLink, Maximize, RefreshCw, Tv, Zap } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Bell, BellOff, CheckCircle2, Crown, ExternalLink, Maximize, Megaphone, RefreshCw, Tv, Zap } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fmtClock, fmtDiff, groupsOfEvent, MATCH_TYPE_LABEL, qualifiersOf, stageLabelOf, stageName, teamName } from '@/lib/engine';
-import { useStandingsEngine } from '@/lib/supabase';
-import type { CourtVM, PlayerRow, PodiumVM, StandingRow, TournamentVM, UIState } from '@/lib/types';
+import { getTournamentStore, useStandingsEngine } from '@/lib/supabase';
+import type { CourtVM, MatchVM, PlayerRow, PodiumVM, StandingRow, TournamentVM, UIState } from '@/lib/types';
 import { BTN_GHOST, BTN_PRIMARY, T1, T4 } from './kit';
 import PodiumView from './PodiumView';
+import { QRCode, tournamentUrl } from './QRCode';
+
+/* ---------------------------- Gọi đội ra sân ---------------------------- */
+const CALL_MS = 12_000;
+
+/**
+ * Queue of matches to announce: every match that newly goes live (after the screen has loaded
+ * its data), plus manual "Gọi lại" requests broadcast from the BTC dashboard.
+ * Each entry has a key so re-calling the match already on screen restarts its 12 s.
+ */
+function useCallQueue(vm: TournamentVM, ready: boolean) {
+  const [queue, setQueue] = useState<{ id: string; key: number }[]>([]);
+  const prev = useRef<Set<string> | null>(null);
+  const seq = useRef(0);
+  const push = useCallback((ids: string[], manual = false) => setQueue((q) => {
+    let next = q;
+    for (const id of ids) {
+      if (manual && next[0]?.id === id) next = [{ id, key: ++seq.current }, ...next.slice(1)];
+      else if (!next.some((x) => x.id === id)) next = [...next, { id, key: ++seq.current }];
+    }
+    return next;
+  }), []);
+
+  useEffect(() => {
+    if (!ready) return; // baseline only once matches are loaded, so already-live courts aren't re-announced
+    const live = new Set(vm.matches.filter((m) => m.status === 'live').map((m) => m.id));
+    if (prev.current) push([...live].filter((id) => !prev.current!.has(id)));
+    prev.current = live;
+  }, [vm.matches, ready, push]);
+
+  useEffect(() => getTournamentStore(vm.tournament.id).onCall((id) => push([id], true)), [vm.tournament.id, push]);
+
+  const current = queue[0] ?? null;
+  const dismiss = useCallback(() => setQueue((q) => q.slice(1)), []);
+  useEffect(() => {
+    if (!current) return undefined;
+    const t = setTimeout(dismiss, CALL_MS);
+    return () => clearTimeout(t);
+  }, [current?.key, dismiss]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { current, dismiss };
+}
+
+/**
+ * Chime (Web Audio, no file) + Vietnamese voice when the TV browser has one.
+ * Browsers (iOS especially) only allow sound after a tap: enable() unlocks both audio and speech.
+ */
+function useAnnouncer() {
+  const ctx = useRef<AudioContext | null>(null);
+  const voice = useRef<SpeechSynthesisVoice | null>(null);
+  const [on, setOn] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  // Voices load asynchronously on Chrome
+  useEffect(() => {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
+    if (!synth) return undefined;
+    const pick = () => { voice.current = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith('vi')) ?? null; };
+    pick();
+    synth.addEventListener?.('voiceschanged', pick);
+    return () => synth.removeEventListener?.('voiceschanged', pick);
+  }, []);
+
+  const enable = useCallback(() => {
+    try {
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ac = ctx.current ?? new AC();
+      ctx.current = ac;
+      ac.onstatechange = () => setRunning(ac.state === 'running');
+      void ac.resume().then(() => setRunning(ac.state === 'running'));
+      // iOS: the first speak() must happen inside the tap
+      if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(' '));
+      setOn(true);
+    } catch { setOn(false); }
+  }, []);
+  const disable = useCallback(() => setOn(false), []);
+
+  const announce = useCallback((text: string) => {
+    const ac = ctx.current;
+    if (!on || !ac) return;
+    if (ac.state !== 'running') void ac.resume(); // woke up after the screen slept
+    [659.25, 523.25, 783.99].forEach((f, i) => { // ding – dong – ding
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      const t0 = ac.currentTime + i * 0.45;
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+      o.connect(g).connect(ac.destination);
+      o.start(t0);
+      o.stop(t0 + 1);
+    });
+    const synth = window.speechSynthesis;
+    if (synth && voice.current) {
+      const v = voice.current;
+      setTimeout(() => {
+        const u = new SpeechSynthesisUtterance(text);
+        u.voice = v;
+        u.lang = v.lang;
+        u.rate = 0.95;
+        synth.speak(u);
+      }, 1500);
+    }
+  }, [on]);
+
+  return { on, active: on && running, enable, disable, announce };
+}
+
+function CallOverlay({ m, vm }: { m: MatchVM; vm: TournamentVM }) {
+  const ev = vm.events.find((e) => e.id === m.eventId);
+  const team = (id: string) => vm.teams.find((t) => t.id === id);
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-[1.6cqw] bg-slate-950/95 px-[6cqw] text-center" role="alert">
+      <span className="inline-flex items-center gap-[0.8cqw] rounded-full bg-amber-500/15 px-[1.6cqw] py-[0.5cqw] text-[length:1.4cqw] font-semibold tracking-wide text-amber-300">
+        <Megaphone className="h-[1.6cqw] w-[1.6cqw]" /> MỜI CÁC VĐV RA SÂN
+      </span>
+      <p className="pm-num text-[length:7cqw] font-extrabold leading-none text-white">{m.court ?? 'Sân'}</p>
+      <p className="text-[length:1.4cqw] font-medium text-slate-400">{[ev?.label, stageLabelOf(m)].filter(Boolean).join(' · ')}</p>
+      <div className="flex w-full items-center justify-center gap-[2cqw]">
+        <span className="min-w-0 flex-1 text-right text-[length:3cqw] font-bold leading-tight text-white">{teamName(team(m.a), vm.players)}</span>
+        <span className="text-[length:1.8cqw] font-semibold text-slate-500">gặp</span>
+        <span className="min-w-0 flex-1 text-left text-[length:3cqw] font-bold leading-tight text-white">{teamName(team(m.b), vm.players)}</span>
+      </div>
+      {m.referee && <p className="text-[length:1.3cqw] text-slate-400">Trọng tài: <span className="text-slate-200">{m.referee}</span></p>}
+      <div className="absolute inset-x-0 bottom-0 h-[0.4cqw] bg-white/5">
+        <div key={m.id} className="h-full origin-left bg-amber-400/70" style={{ animation: `pm-shrink ${CALL_MS}ms linear forwards` }} />
+      </div>
+    </div>
+  );
+}
 
 /* =====================================================================
    TV Broadcast 16:9 (approved v4 demo skin)
@@ -110,15 +241,36 @@ function TVStandings({ rows, players, advance }: { rows: StandingRow[]; players:
 }
 
 export default function TVBroadcastView({
-  vm, ui, setUi, standalone = false,
+  vm, ui, setUi, standalone = false, ready = true,
 }: {
   vm: TournamentVM;
+  /** Matches loaded (the call-to-court overlay only starts watching then) */
+  ready?: boolean;
   ui: Pick<UIState, 'tvCycle' | 'tvIdx' | 'tvView'>;
   setUi: (patch: Partial<UIState> | ((u: UIState) => Partial<UIState>)) => void;
   /** true on /tv/[id]: frame fills the whole screen, no control bar */
   standalone?: boolean;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
+  const [qrUrl, setQrUrl] = useState('');
+  useEffect(() => { setQrUrl(tournamentUrl(vm.tournament.id)); }, [vm.tournament.id]);
+  const { current: call, dismiss } = useCallQueue(vm, ready);
+  const callId = call?.id ?? null;
+  const calling = callId ? vm.matches.find((m) => m.id === callId) ?? null : null;
+  useEffect(() => { if (callId && !calling) dismiss(); }, [callId, calling, dismiss]); // match vanished (e.g. schedule rebuilt)
+  const announcer = useAnnouncer();
+  const { announce } = announcer;
+  useEffect(() => {
+    if (!calling || ui.tvView === 'podium') return;
+    const name = (id: string) => teamName(vm.teams.find((t) => t.id === id), vm.players);
+    announce(`Mời ${name(calling.a)} và ${name(calling.b)} ra ${calling.court ?? 'sân'}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.key]);
+  const soundBtn = (
+    <button type="button" onClick={announcer.active ? announcer.disable : announcer.enable} className={BTN_GHOST} title="Âm thanh gọi đội ra sân">
+      {announcer.active ? <><Bell className="h-4 w-4" /> Âm thanh: Bật</> : <><BellOff className="h-4 w-4" /> Bật âm thanh gọi đội</>}
+    </button>
+  );
   const now = useNow();
   const engine = useStandingsEngine(vm.tournament.id);
 
@@ -135,7 +287,10 @@ export default function TVBroadcastView({
   const podiums = vm.events.map((e) => engine.podiumFor(e.id)).filter((p): p is PodiumVM => !!p && p.entries.length > 0);
   const podium = podiums.length ? podiums[ui.tvIdx % podiums.length] : undefined;
   const liveN = vm.courts.filter((c) => c.matchId).length;
-  const nextUp = vm.matches.filter((m) => m.status === 'upcoming').slice(0, 3);
+  // With check-in on, only matches whose players are all present can be called next
+  const present = new Set(vm.checkedInIds);
+  const ready4 = (teamId: string) => (vm.teams.find((t) => t.id === teamId)?.pids ?? []).every((id) => present.has(id));
+  const nextUp = vm.matches.filter((m) => m.status === 'upcoming' && (!vm.rules.checkIn || (ready4(m.a) && ready4(m.b)))).slice(0, 3);
   const lastDone = vm.matches.filter((m) => m.status === 'completed').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).slice(-4).reverse();
   const tn = (id: string, short?: boolean) => teamName(vm.teams.find((t) => t.id === id), vm.players, short);
   const compact = vm.courts.length > 2;
@@ -207,7 +362,8 @@ export default function TVBroadcastView({
                   </div>
                 )}
               </div>
-              <div className={TV_CARD}>
+              <div className={`${TV_CARD} flex overflow-hidden`}>
+                <div className="min-w-0 flex-1">
                 <p className="px-[1.4cqw] py-[0.8cqw] text-[length:1.5cqw] font-semibold text-white">Trận kế tiếp</p>
                 {nextUp.map((m) => (
                   <div key={m.id} className="flex items-center gap-[0.8cqw] border-t border-white/5 px-[1.4cqw] py-[0.5cqw]">
@@ -218,10 +374,17 @@ export default function TVBroadcastView({
                   </div>
                 ))}
                 {!nextUp.length && <p className="border-t border-white/5 px-[1.4cqw] py-[0.6cqw] text-[length:1.1cqw] text-slate-500">Đã hết lịch thi đấu</p>}
+                </div>
+                <div className="flex w-[9cqw] shrink-0 flex-col items-center justify-center gap-[0.3cqw] border-l border-white/5 p-[0.8cqw]">
+                  <QRCode value={qrUrl} title="Quét để xem trực tiếp" className="w-full rounded-[0.4cqw]" />
+                  <span className="text-center text-[length:0.85cqw] leading-tight text-slate-400">Quét xem trực tiếp</span>
+                </div>
               </div>
             </div>
           </div>
         )}
+
+        {!podiumMode && calling && <CallOverlay m={calling} vm={vm} />}
 
         {/* Ticker */}
         <div className="flex items-stretch overflow-hidden border-t border-white/5 bg-slate-900/60">
@@ -241,7 +404,13 @@ export default function TVBroadcastView({
   );
 
   if (standalone) {
-    return <div className="flex h-screen w-screen items-center justify-center bg-slate-950" onDoubleClick={goFull}>{frame}</div>;
+    return (
+      <div className="relative flex h-screen w-screen items-center justify-center bg-slate-950" onDoubleClick={goFull}>
+        {frame}
+        {/* Browsers only allow sound after one tap: shown until enabled */}
+        {!announcer.active && <div className="absolute left-3 top-3 z-30 opacity-70 hover:opacity-100">{soundBtn}</div>}
+      </div>
+    );
   }
 
   return (
@@ -252,6 +421,7 @@ export default function TVBroadcastView({
           <h1 className={`${T1} text-white`}>TV Broadcast</h1>
         </div>
         <div className="flex flex-wrap gap-2">
+          {soundBtn}
           <button type="button" onClick={() => setUi({ tvCycle: !ui.tvCycle })} className={BTN_GHOST}>
             <RefreshCw className="h-4 w-4" /> Tự chuyển bảng: {ui.tvCycle ? 'Bật' : 'Tắt'}
           </button>

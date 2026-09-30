@@ -11,7 +11,7 @@ export const GROUP_LETTERS = ['A', 'B', 'C', 'D'] as const;
 export const DEFAULT_TIEBREAKERS: TieBreaker[] = ['wins', 'h2h', 'diff', 'pf'];
 export const DEFAULT_RULES: RulesConfig = {
   target: 11, winBy: 2, pointsPerWin: 2, tieBreakers: DEFAULT_TIEBREAKERS, courts: ['Sân 1', 'Sân 2'],
-  autoKnockout: true, bronzeMatch: true,
+  autoKnockout: true, bronzeMatch: true, checkIn: false, slotMinutes: 20,
 };
 
 export const TB_LABELS: Record<TieBreaker, string> = {
@@ -176,6 +176,7 @@ export function buildViewModel(input: {
   matches: MatchRow[];
   players: PlayerRow[];
   participantIds?: string[];
+  checkedInIds?: string[];
 }): TournamentVM {
   const rules = withDefaults<RulesConfig>(DEFAULT_RULES, input.tournament.rules_config);
   const events: EventVM[] = [...input.events]
@@ -238,6 +239,7 @@ export function buildViewModel(input: {
         historyLength: st.history?.length ?? 0,
         updatedAt: m.updated_at,
         referee: m.referee ?? null,
+        walkover: !!m.walkover,
         game: 1,
       };
     });
@@ -250,6 +252,7 @@ export function buildViewModel(input: {
   return {
     tournament: input.tournament, rules, events, teams, matches, players: input.players, courts,
     participantIds: input.participantIds ?? [],
+    checkedInIds: input.checkedInIds ?? [],
     locked: input.tournament.status === 'completed',
   };
 }
@@ -369,6 +372,8 @@ export const RPC_ERRORS: Record<string, string> = {
   KNOCKOUT_STARTED: 'Vòng này đã có trận bắt đầu nên không huỷ được.',
   INVALID_PAIRS: 'Cặp đấu loại trực tiếp không hợp lệ.',
   INVALID_STAGE: 'Vòng đấu không hợp lệ.',
+  INVALID_SLOT: 'Thời lượng mỗi trận phải từ 5 đến 120 phút.',
+  ALREADY_COMPLETED: 'Trận đã có kết quả. Sửa tỉ số ở Kết quả nhanh.',
   ADMIN_ONLY: 'Chỉ Admin mới mở lại được giải đã kết thúc.',
   LAST_ADMIN: 'Phải còn ít nhất một Admin. Hãy thêm Admin khác trước.',
   ADMIN_EXISTS: 'Hệ thống đã có Admin.',

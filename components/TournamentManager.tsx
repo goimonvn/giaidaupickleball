@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarDays, Lock, LockOpen, Pencil, Plus, Radio, Trash2, Trophy } from 'lucide-react';
+import { CalendarDays, Lock, LockOpen, Pencil, Plus, QrCode, Radio, Trash2, Trophy } from 'lucide-react';
 import { useState } from 'react';
 import { completeTournament, createTournament, deleteTournament, reopenTournament, updateTournament } from '@/lib/actions';
 import { refreshTournament } from '@/lib/client-actions';
@@ -8,8 +8,9 @@ import { DEFAULT_RULES, dateInputOf, fmtDateVN, startsAtOf, STATUS_TAG, statusTa
 import type { AuthState } from '@/lib/supabase';
 import type { EventInput, RulesConfig, TournamentInput, TournamentRow, TournamentStatusTag } from '@/lib/types';
 import { EVENT_PRESETS } from './AdminDashboard';
+import { QRShareSheet } from './QRCode';
 import {
-  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, DATE_INPUT, Empty, Field, INPUT, Segmented, Sheet, T1, T2, T3, T4, Toggle, type Toast,
+  BTN_DANGER, BTN_GHOST, BTN_PRIMARY, CARD, chipCls, Confirm, DATE_INPUT, Empty, Field, ICON_BTN, INPUT, Segmented, Sheet, T1, T2, T3, T4, Toggle, type Toast,
 } from './kit';
 
 /* =====================================================================
@@ -111,6 +112,7 @@ export default function TournamentManager({
   const [confirm, setConfirm] = useState<{ id: string; kind: 'delete' | 'lock' | 'unlock' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<'all' | TournamentStatusTag>('all');
+  const [qr, setQr] = useState<TournamentRow | null>(null);
 
   if (!auth.isOrganizer) return <Empty>Chỉ Ban tổ chức và Admin quản lý được giải đấu.</Empty>;
 
@@ -182,6 +184,7 @@ export default function TournamentManager({
                   </div>
                   <p className={`${T3} mt-0.5 text-slate-400`}>{fmtDateVN(t.starts_at)}{t.starts_at ? ` · ${timeInputOf(t.starts_at)}` : ''} · {courts} sân{t.venue ? ` · ${t.venue}` : ''}</p>
                 </div>
+                <button type="button" aria-label={`Mã QR của ${t.title}`} title="Mã QR của giải" onClick={() => setQr(t)} className={ICON_BTN}><QrCode className="h-4 w-4" /></button>
               </div>
 
               {c?.kind === 'delete' ? (
@@ -217,6 +220,7 @@ export default function TournamentManager({
       </ul>
 
       {edit && <TournamentForm initial={edit === 'new' ? null : edit} onSave={save} onClose={() => setEdit(null)} />}
+      {qr && <QRShareSheet tournament={qr} toast={toast} onClose={() => setQr(null)} />}
     </div>
   );
 }

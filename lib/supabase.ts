@@ -41,12 +41,13 @@ export interface TournamentSnapshot {
   teams: GroupTeamRow[];
   players: PlayerRow[];
   participantIds: string[];
+  checkedInIds: string[];
   matches: MatchRow[];
 }
 
 const EMPTY: TournamentSnapshot = {
   status: 'idle', error: null, connected: false, tournament: null,
-  events: [], groups: [], teams: [], players: [], participantIds: [], matches: [],
+  events: [], groups: [], teams: [], players: [], participantIds: [], checkedInIds: [], matches: [],
 };
 
 class TournamentStore {
@@ -84,6 +85,22 @@ class TournamentStore {
     });
   }
 
+  /* ---- "Gọi đội ra sân" on the venue TV: realtime broadcast on the tournament channel ---- */
+  private callListeners = new Set<(matchId: string) => void>();
+
+  /** Listen for manual "gọi lại" requests (the TV page). Returns an unsubscribe function. */
+  onCall(fn: (matchId: string) => void) {
+    this.callListeners.add(fn);
+    return () => { this.callListeners.delete(fn); };
+  }
+
+  /** Ask every open TV screen to show the call-to-court overlay for this match again. */
+  async sendCall(matchId: string) {
+    if (!this.channel || !this.snap.connected) return false;
+    const res = await this.channel.send({ type: 'broadcast', event: 'call', payload: { matchId } });
+    return res === 'ok';
+  }
+
   getMatch(id: string) {
     return this.snap.matches.find((m) => m.id === id);
   }
@@ -102,7 +119,8 @@ class TournamentStore {
       sb.from('tournament_events').select('*').eq('tournament_id', this.id).order('sort_order'),
       sb.from('tournament_groups').select('*').eq('tournament_id', this.id).order('sort_order'),
       sb.from('players').select('id, full_name, skill_rating, group_tag, gender, avatar_url, created_at').order('skill_rating', { ascending: false }),
-      sb.from('tournament_players').select('player_id').eq('tournament_id', this.id),
+      // '*' so the app still works before the v1.4 migration adds checked_in_at
+      sb.from('tournament_players').select('*').eq('tournament_id', this.id),
     ]);
     const err = t.error || e.error || g.error || p.error || tp.error;
     if (err) throw err;
@@ -118,6 +136,7 @@ class TournamentStore {
       teams: (teams.data ?? []) as GroupTeamRow[],
       players: ((p.data ?? []) as PlayerRow[]).map((x) => ({ ...x, skill_rating: Number(x.skill_rating) })),
       participantIds: ((tp.data ?? []) as { player_id: string }[]).map((x) => x.player_id),
+      checkedInIds: ((tp.data ?? []) as { player_id: string; checked_in_at?: string | null }[]).filter((x) => x.checked_in_at).map((x) => x.player_id),
     });
   }
 
@@ -160,6 +179,10 @@ class TournamentStore {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament_groups', filter: `tournament_id=eq.${this.id}` }, () => this.scheduleSetupReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament_players', filter: `tournament_id=eq.${this.id}` }, () => this.scheduleSetupReload())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'group_teams' }, () => this.scheduleSetupReload())
+      .on('broadcast', { event: 'call' }, (msg: { payload?: { matchId?: string } }) => {
+        const id = msg.payload?.matchId;
+        if (id) this.callListeners.forEach((l) => l(id));
+      })
       .subscribe((status: string) => {
         const connected = status === 'SUBSCRIBED';
         this.set({ connected });
@@ -218,8 +241,9 @@ export function useTournamentData(tournamentId: string | null | undefined) {
       matches: snap.matches,
       players: snap.players,
       participantIds: snap.participantIds,
+      checkedInIds: snap.checkedInIds,
     });
-  }, [snap.tournament, snap.events, snap.groups, snap.teams, snap.matches, snap.players, snap.participantIds]);
+  }, [snap.tournament, snap.events, snap.groups, snap.teams, snap.matches, snap.players, snap.participantIds, snap.checkedInIds]);
   return { vm, status: snap.status, error: snap.error, connected: snap.connected };
 }
 
