@@ -151,7 +151,7 @@ export function MatchDrawer({ m, vm, onClose }: { m: MatchVM; vm: TournamentVM; 
 }
 
 /* ---------------------------- standings ---------------------------- */
-function StandingsTable({ title, rows, players, advance, stage }: { title: string; rows: StandingRow[]; players: PlayerRow[]; advance: number; stage: string }) {
+function StandingsTable({ title, rows, players, advance, stage, onTeam }: { title: string; rows: StandingRow[]; players: PlayerRow[]; advance: number; stage: string; onTeam: (teamId: string) => void }) {
   const cols = 'grid grid-cols-[1.5rem_minmax(0,1fr)_2.5rem_2.25rem_2rem] gap-2';
   return (
     <section className={`${CARD} overflow-hidden`}>
@@ -165,11 +165,12 @@ function StandingsTable({ title, rows, players, advance, stage }: { title: strin
       {rows.map((r, i) => (
         <div key={r.team.id} className={`${cols} items-center px-4 py-2 ${i === advance ? 'border-t border-dashed border-white/10' : 'border-t border-white/5'}`}>
           <span className={`pm-num ${T3} ${i < advance ? 'text-white' : 'text-slate-500'}`}>{i + 1}</span>
-          <span className={`${T3} flex min-w-0 items-center gap-1.5 ${i < advance ? 'text-slate-100' : 'text-slate-400'}`}>
+          <button type="button" onClick={() => onTeam(r.team.id)} aria-label={`Xem các trận của ${teamName(r.team, players)}`}
+            className={`${T3} flex min-w-0 items-center gap-1.5 text-left underline-offset-2 hover:underline ${i < advance ? 'text-slate-100' : 'text-slate-400'}`}>
             <span className="truncate">{teamName(r.team, players)}</span>
             {r.live && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#84CC16]" aria-label="Đang thi đấu" />}
             {i < advance && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-label="Đi tiếp" />}
-          </span>
+          </button>
           <span className={`pm-num ${T3} text-center text-slate-300`}>{r.w}-{r.l}</span>
           <span className={`pm-num ${T3} text-center text-slate-400`}>{fmtDiff(r.diff)}</span>
           <span className={`pm-num ${T2} text-right text-white`}>{r.pts}</span>
@@ -177,6 +178,98 @@ function StandingsTable({ title, rows, players, advance, stage }: { title: strin
       ))}
       {!rows.length && <p className={`${T3} border-t border-white/5 p-4 text-center text-slate-500`}>Chưa có đội.</p>}
     </section>
+  );
+}
+
+/* ---------------------------- team results sheet ---------------------------- */
+/** Tap a team in the standings: its results (thắng / thua / tỉ số), live match and remaining matches. */
+function TeamSheet({ teamId, vm, rank, onOpenMatch, onClose }: {
+  teamId: string;
+  vm: TournamentVM;
+  rank: { pos: number; row: StandingRow } | null;
+  onOpenMatch: (id: string) => void;
+  onClose: () => void;
+}) {
+  const team = teamOf(vm, teamId);
+  const ev = vm.events.find((e) => e.id === team?.eventId);
+  const mine = vm.matches.filter((m) => m.a === teamId || m.b === teamId);
+  const done = mine.filter((m) => m.status === 'completed').sort((a, b) => a.order - b.order);
+  const live = mine.filter((m) => m.status === 'live');
+  const next = mine.filter((m) => m.status === 'upcoming').sort((a, b) => a.order - b.order);
+  const wins = done.filter((m) => winnerIdOf(m) === teamId).length;
+  if (!team) return null;
+
+  const row = (m: MatchVM) => {
+    const isA = m.a === teamId;
+    const opp = teamOf(vm, isA ? m.b : m.a);
+    const mineScore = isA ? m.sa : m.sb;
+    const oppScore = isA ? m.sb : m.sa;
+    const won = m.status === 'completed' && winnerIdOf(m) === teamId;
+    const isLive = m.status === 'live';
+    const meta = [stageLabelOf(m), m.court ?? (m.status === 'upcoming' ? m.time || 'Chưa xếp giờ' : null)].filter(Boolean).join(' • ');
+    return (
+      <li key={m.id}>
+        <button type="button" onClick={() => onOpenMatch(m.id)} className="flex min-h-[52px] w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-white/[0.03]">
+          {m.status === 'completed' ? (
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${T4} ${won ? 'bg-white/10 text-white' : 'bg-rose-500/10 text-rose-300'}`}>{won ? 'T' : 'B'}</span>
+          ) : isLive ? (
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center"><span className="pm-pulse h-2 w-2 rounded-full bg-[#84CC16]" aria-label="Đang đấu" /></span>
+          ) : (
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-white/10" aria-hidden="true" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className={`${T4} block truncate text-slate-500`}>{meta}</span>
+            <span className={`${T3} block truncate ${m.status === 'completed' && !won ? 'text-slate-400' : 'text-slate-100'}`}>gặp {teamName(opp, vm.players)}</span>
+          </span>
+          {m.status === 'upcoming' ? (
+            <span className={`${T4} shrink-0 text-slate-500`}>Chưa đấu</span>
+          ) : (
+            <span className={`pm-num ${T2} shrink-0 ${isLive ? 'text-[#84CC16]' : won ? 'text-white' : 'text-slate-400'}`}>{mineScore}–{oppScore}</span>
+          )}
+        </button>
+      </li>
+    );
+  };
+
+  const section = (title: string, list: MatchVM[], empty: string) => (
+    <div>
+      <p className={`${T4} mb-1.5 flex justify-between text-slate-500`}><span>{title}</span><span>{list.length} trận</span></p>
+      {list.length ? <ul className={`${SURFACE} divide-y divide-white/5 overflow-hidden`}>{list.map(row)}</ul> : <p className={`${T3} text-slate-500`}>{empty}</p>}
+    </div>
+  );
+
+  return (
+    <Sheet title={teamName(team, vm.players)} onClose={onClose}>
+      <div className="flex items-center gap-3">
+        <span className="flex -space-x-2">{peopleOf(team, vm.players).map((p) => <Avatar key={p.id} name={p.name} src={p.src} size="h-10 w-10" />)}</span>
+        <div className="min-w-0">
+          <p className={`${T4} text-slate-500`}>{[ev?.label, team.group ? `Bảng ${team.group}` : null].filter(Boolean).join(' · ')}</p>
+          <p className={`${T3} text-slate-300`}>
+            {team.pids.map((id) => { const p = vm.players.find((x) => x.id === id); return p ? `${p.full_name} (${Number(p.skill_rating).toFixed(1)})` : '?'; }).join(' · ')}
+          </p>
+        </div>
+      </div>
+
+      <dl className="mt-3 grid grid-cols-4 gap-2">
+        {[
+          ['Hạng', rank ? String(rank.pos) : '–'],
+          ['Thắng-Thua', `${wins}-${done.length - wins}`],
+          ['Hiệu số', rank ? fmtDiff(rank.row.diff) : '–'],
+          ['Điểm BXH', rank ? String(rank.row.pts) : '–'],
+        ].map(([k, v]) => (
+          <div key={k} className={`${SURFACE} px-2 py-2 text-center`}>
+            <dt className={`${T4} truncate text-slate-500`}>{k}</dt>
+            <dd className={`pm-num ${T2} text-white`}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="mt-4 flex flex-col gap-4">
+        {live.length > 0 && section('ĐANG THI ĐẤU', live, '')}
+        {section('ĐÃ THI ĐẤU', [...done].reverse(), 'Chưa có trận nào kết thúc.')}
+        {section('CÁC TRẬN CÒN LẠI', next, vm.locked ? 'Giải đã kết thúc.' : 'Không còn trận nào đã xếp lịch.')}
+      </div>
+    </Sheet>
   );
 }
 
@@ -303,6 +396,7 @@ export default function PublicView({ vm, tab, ui, setUi }: { vm: TournamentVM; t
   const engine = useStandingsEngine(vm.tournament.id);
   const fire = useConfetti();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [showAllDone, setShowAllDone] = useState(false);
 
@@ -380,7 +474,7 @@ export default function PublicView({ vm, tab, ui, setUi }: { vm: TournamentVM; t
         {eventPicker(false)}
         <div className={`grid gap-4 ${groups.length > 1 ? 'md:grid-cols-2' : ''}`}>
           {groups.map((g) => (
-            <StandingsTable key={g ?? 'all'} title={g ? `Bảng ${g}` : `Bảng xếp hạng · ${ev.label}`} rows={engine.getStandings(ev.id, g)} players={vm.players} advance={cfg.advance} stage={stage} />
+            <StandingsTable key={g ?? 'all'} title={g ? `Bảng ${g}` : `Bảng xếp hạng · ${ev.label}`} rows={engine.getStandings(ev.id, g)} players={vm.players} advance={cfg.advance} stage={stage} onTeam={setTeamId} />
           ))}
         </div>
         <p className={`${T4} px-1 text-slate-500`}>Ưu tiên khi bằng điểm: {engine.tieBreakers.map((k) => TB_LABELS[k]).join(' → ')}</p>
@@ -426,6 +520,15 @@ export default function PublicView({ vm, tab, ui, setUi }: { vm: TournamentVM; t
   return (
     <div className="flex flex-col gap-4">
       {body}
+      {teamId && !openMatch && (() => {
+        const t = teamOf(vm, teamId);
+        const rows = t ? engine.getStandings(t.eventId, t.group) : [];
+        const pos = rows.findIndex((r) => r.team.id === teamId);
+        return (
+          <TeamSheet teamId={teamId} vm={vm} rank={pos >= 0 ? { pos: pos + 1, row: rows[pos] } : null}
+            onOpenMatch={setOpenId} onClose={() => setTeamId(null)} />
+        );
+      })()}
       {openMatch && <MatchDrawer m={openMatch} vm={vm} onClose={() => setOpenId(null)} />}
     </div>
   );
