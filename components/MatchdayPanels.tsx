@@ -1,12 +1,12 @@
 'use client';
 
-import { CalendarClock, Check, Repeat, UserX } from 'lucide-react';
+import { CalendarClock, Check, ChevronDown, Repeat, UserX } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { patchRules, rescheduleMatches, setCheckin, setCheckinMany, substitutePlayer, walkoverMatch } from '@/lib/client-actions';
 import { dateInputOf, fmtHM, startsAtOf, teamName, timeInputOf } from '@/lib/engine';
 import type { EventVM, MatchVM, TeamVM, TournamentVM } from '@/lib/types';
 import {
-  BTN_GHOST, BTN_PRIMARY, Confirm, DATE_INPUT, Field, INPUT, Segmented, Sheet, StripGroup, SURFACE, T3, T4, Toggle, type Toast,
+  BTN_GHOST, BTN_PRIMARY, CARD, Confirm, DATE_INPUT, Field, INPUT, Segmented, Sheet, StripGroup, SURFACE, T2, T3, T4, Toggle, type Toast,
 } from './kit';
 
 /* =====================================================================
@@ -33,6 +33,9 @@ export function CheckInPanel({ vm, ev, toast }: { vm: TournamentVM; ev: EventVM;
   const teams = vm.teams.filter((t) => t.eventId === ev.id).sort((a, b) => (a.group ?? '').localeCompare(b.group ?? '') || (a.seed ?? 99) - (b.seed ?? 99));
   const pids = teams.flatMap((t) => t.pids);
   const presentN = pids.filter((id) => present.has(id)).length;
+  const allIn = pids.length > 0 && presentN === pids.length;
+  // Collapsed when everyone is already here (on open, and right after "Có mặt tất cả")
+  const [collapsed, setCollapsed] = useState(allIn);
   const teamOk = (t: TeamVM) => t.pids.every((id) => present.has(id));
   const shown = onlyAbsent ? teams.filter((t) => !teamOk(t)) : teams;
   const inEvent = new Set(pids);
@@ -49,6 +52,7 @@ export function CheckInPanel({ vm, ev, toast }: { vm: TournamentVM; ev: EventVM;
     try {
       await setCheckinMany(vm.tournament.id, pids.filter((x) => !present.has(x)), true);
       toast(`${ev.label}: đã điểm danh tất cả VĐV`);
+      setCollapsed(true);
     } catch (e) { toast(errMsg(e), 'error'); }
     setBusy(null);
   };
@@ -78,8 +82,31 @@ export function CheckInPanel({ vm, ev, toast }: { vm: TournamentVM; ev: EventVM;
     setBusy(null);
   };
 
+  if (collapsed) {
+    return (
+      <button type="button" onClick={() => setCollapsed(false)} aria-expanded={false}
+        className={`${CARD} flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-white/[0.03]`}>
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${allIn ? 'bg-slate-100 text-slate-950' : 'border border-white/10 text-slate-400'}`}>
+          {allIn ? <Check className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={`${T2} block text-slate-100`}>Điểm danh · {ev.label}</span>
+          <span className={`${T4} block text-slate-500`}>
+            {allIn ? `Đủ ${presentN}/${pids.length} VĐV có mặt` : `${presentN}/${pids.length} có mặt · còn ${pids.length - presentN} VĐV chưa điểm danh`}
+            {vm.rules.checkIn ? ' · chỉ gọi trận khi đủ người' : ''}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+      </button>
+    );
+  }
+
   return (
-    <StripGroup title={`Điểm danh · ${ev.label}`} right={<span className={`pm-num ${T4} text-slate-400`}>{presentN}/{pids.length} có mặt</span>}>
+    <StripGroup title={`Điểm danh · ${ev.label}`} right={
+      <button type="button" onClick={() => setCollapsed(true)} aria-expanded className={`inline-flex h-8 items-center gap-1 rounded-lg px-2 ${T4} text-slate-400 hover:bg-white/5 hover:text-white`}>
+        <span className="pm-num">{presentN}/{pids.length} có mặt</span><ChevronDown className="h-4 w-4 rotate-180" /><span className="sr-only">Thu gọn</span>
+      </button>
+    }>
       <div className="flex flex-col gap-2 px-4 py-3">
         <Toggle checked={!!vm.rules.checkIn} disabled={locked || busy === 'rule'} onChange={(v) => void setRule(v)} label="Chỉ gọi trận lên sân khi đủ VĐV có mặt" />
         <div className="flex items-center justify-between gap-2">
